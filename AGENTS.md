@@ -65,6 +65,7 @@ stm32-interview/
 - **引号**：正文用中文引号；代码与属性内必须是 ASCII 直引号。
 - **目录**：新增 `<h2 id="..." data-toc="...">` 才会自动进左侧目录（`app.js` 从 `data-toc` 取标题）。
 - **禁止提交托管平台注入物**：`data-page-node-id`、`<!--pnid:-->`、`/page/page_comm/inject.js`。出现即说明内容是从 WorkBuddy 发布快照同步来的，必须清除（该脚本路径在 GitHub 上必然 404）。
+- **两栏联动组件 `.codewalk`**：左码右讲。每行 `.cw-line[data-step]` 与右侧 `.cw-card[data-step]` 用同一个 step 值配对；`assets/app.js` 自动编号、绑定点击双向高亮、提供复制按钮，新增步骤只需同时加这两处，不要另写脚本。
 - `.nojekyll` 缺失会导致 Jekyll 介入，可能造成文件 404。
 - 提交信息用中文，格式 `type(范围): 说明`。
 
