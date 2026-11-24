@@ -470,69 +470,55 @@ malloc 返回 heap       000001CD1E7D6880   页属性 = PAGE_READWRITE  可读�
         这就是 Windows 的"写时复制"：镜像里的 .data 页初始是共享只读的，<b>第一次写它时才复制一份私有页</b>，之后就可写。所以它既省内存、又保证各进程互不干扰。<b>结论不变</b>：普通全局变量是"可写"的，const 是"写就崩"的。MCU 上没有 MMU，所以没有这类花活——SRAM 一律可写，Flash 一律写不了。
       </div>
 
-      <figure class="code">
-        <figcaption><span class="fname">mem_layout_stm32.c</span><span class="note">节选；文件末尾另有 HOST_TEST 分支供 PC 验证 · AC5/AC6 编译通过</span><button class="copy" type="button">复制</button></figcaption>
-        <pre><code class="lang-c">#include &lt;stdint.h&gt;
-
-/* ===== 1. 烧进 Flash 的：const 量 + 代码本身 ===== */
-const uint8_t seg7_map[10] = {           /* 段码表：全生命周期只读 */
-    0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F
-};
-const char fw_ver[] = "v1.0.3";          /* 字符串常量，同样在 Flash */
-
-/* ===== 2. 有初值的全局 → .data（初值另存 Flash，上电拷到 SRAM）===== */
-volatile uint32_t g_tick  = 0;
-uint16_t          g_cal_k = 1024;
-
-/* ===== 3. 无初值的全局 → .bss（上电清零，不占 Flash 体积）===== */
-uint16_t g_dma_buf[512];                 /* 1KB，全在 SRAM */
-uint32_t g_err_cnt;
-
-/* ===== 4. 外设寄存器：映射进地址空间，必须 volatile ===== */
-#define RCC_APB2ENR (*(volatile uint32_t *)0x40021018UL)
-#define GPIOC_CRH   (*(volatile uint32_t *)0x40011004UL)
-#define GPIOC_ODR   (*(volatile uint32_t *)0x4001100CUL)
-
-void led_pc13_init(void)
-{
-    RCC_APB2ENR |= (1UL &lt;&lt; 4);        /* 开 GPIOC 时钟 */
-    GPIOC_CRH   &amp;= ~(0xFUL &lt;&lt; 20);     /* PC13 在 CRH 第 (13-8)=5 个 4 位组 */
-    GPIOC_CRH   |=  (0x3UL &lt;&lt; 20);     /* 推挽 50MHz */
-}
-
-void led_pc13_set(int on)
-{
-    if (on) GPIOC_ODR &amp;= ~(1UL &lt;&lt; 13);
-    else    GPIOC_ODR |=  (1UL &lt;&lt; 13);
-}
-
-/* ===== 5. 分区判定：纯整数比较，PC 上也能跑 ===== */
-typedef struct { const char *name; uintptr_t base, end; } region_t;
-
-static const region_t REGIONS[] = {
-    { "Flash  (ROM role)", 0x08000000UL, 0x08010000UL },  /* F103C8T6: 64KB */
-    { "SRAM   (RAM role)", 0x20000000UL, 0x20005000UL },  /* F103C8T6: 20KB */
-    { "PERIPH MMIO      ", 0x40000000UL, 0x40024000UL },
-    { "CORE PRIVATE     ", 0xE0000000UL, 0xE0100000UL },
-};
-
-const char *region_of(uintptr_t addr)
-{
-    unsigned i;
-    for (i = 0; i &lt; sizeof(REGIONS) / sizeof(REGIONS[0]); i++)
-        if (addr &gt;= REGIONS[i].base &amp;&amp; addr &lt; REGIONS[i].end)
-            return REGIONS[i].name;
-    return "UNKNOWN";
-}
-
-/* ===== 6. 反例：往 Flash 地址直接赋值 ===== */
-#if 0
-void never_do_this(void)
-{
-    *(volatile uint8_t *)0x08000000UL = 0x00;   /* 总线错误 → HardFault */
-}
-#endif</code></pre>
-      </figure>
+      <div class="codewalk">
+        <div class="cw-head"><span class="cw-fname">mem_layout_stm32.c</span><span class="cw-note">左侧逐行 · 右侧讲解 · 点任一侧，另一边同步高亮</span><button class="cw-copy" type="button">复制代码</button></div>
+        <div class="cw-code">
+<div class="cw-line" data-step="m1"><span class="cw-no"></span><code>#include &lt;stdint.h&gt;</code><span class="cw-tip">只用定长类型</span></div>
+<div class="cw-line" data-step="m1"><span class="cw-no"></span><code>const uint8_t seg7_map[10] = { 0x3F, 0x06, 0x5B, ... };</code><span class="cw-tip">段码表 → .rodata</span></div>
+<div class="cw-line" data-step="m1"><span class="cw-no"></span><code>const char fw_ver[] = "v1.0.3";</code><span class="cw-tip">字符串常量 → Flash</span></div>
+<div class="cw-line" data-step="m2"><span class="cw-no"></span><code>volatile uint32_t g_tick = 0;</code><span class="cw-tip">有初值 → .data</span></div>
+<div class="cw-line" data-step="m2"><span class="cw-no"></span><code>uint16_t          g_cal_k = 1024;</code><span class="cw-tip">初值另存 Flash</span></div>
+<div class="cw-line" data-step="m3"><span class="cw-no"></span><code>uint16_t g_dma_buf[512];</code><span class="cw-tip">1KB，进 .bss</span></div>
+<div class="cw-line" data-step="m3"><span class="cw-no"></span><code>uint32_t g_err_cnt;</code><span class="cw-tip">不占 Flash 体积</span></div>
+<div class="cw-line" data-step="m4"><span class="cw-no"></span><code>#define RCC_APB2ENR (*(volatile uint32_t *)0x40021018UL)</code><span class="cw-tip">时钟使能寄存器</span></div>
+<div class="cw-line" data-step="m4"><span class="cw-no"></span><code>#define GPIOC_CRH   (*(volatile uint32_t *)0x40011004UL)</code><span class="cw-tip">PC13 的模式位</span></div>
+<div class="cw-line" data-step="m4"><span class="cw-no"></span><code>#define GPIOC_ODR   (*(volatile uint32_t *)0x4001100CUL)</code><span class="cw-tip">输出电平</span></div>
+<div class="cw-line" data-step="m5"><span class="cw-no"></span><code>void led_pc13_init(void)</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m5"><span class="cw-no"></span><code>{</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m5"><span class="cw-no"></span><code>    RCC_APB2ENR |= (1UL &lt;&lt; 4);</code><span class="cw-tip">① 先开时钟</span></div>
+<div class="cw-line" data-step="m5"><span class="cw-no"></span><code>    GPIOC_CRH   &amp;= ~(0xFUL &lt;&lt; 20);</code><span class="cw-tip">② 清 4 位（掩码 0xF）</span></div>
+<div class="cw-line" data-step="m5"><span class="cw-no"></span><code>    GPIOC_CRH   |=  (0x3UL &lt;&lt; 20);</code><span class="cw-tip">③ 推挽 50MHz</span></div>
+<div class="cw-line" data-step="m5"><span class="cw-no"></span><code>}</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m6"><span class="cw-no"></span><code>void led_pc13_set(int on)</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m6"><span class="cw-no"></span><code>{</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m6"><span class="cw-no"></span><code>    if (on) GPIOC_ODR &amp;= ~(1UL &lt;&lt; 13);</code><span class="cw-tip">低电平点亮</span></div>
+<div class="cw-line" data-step="m6"><span class="cw-no"></span><code>    else    GPIOC_ODR |=  (1UL &lt;&lt; 13);</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m6"><span class="cw-no"></span><code>}</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m7"><span class="cw-no"></span><code>const char *region_of(uintptr_t addr)</code><span class="cw-tip">纯整数比较，PC 也能跑</span></div>
+<div class="cw-line" data-step="m7"><span class="cw-no"></span><code>{</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m7"><span class="cw-no"></span><code>    for (i = 0; i &lt; N; i++)</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m7"><span class="cw-no"></span><code>        if (addr &gt;= REGIONS[i].base &amp;&amp; addr &lt; REGIONS[i].end)</code><span class="cw-tip">左闭右开</span></div>
+<div class="cw-line" data-step="m7"><span class="cw-no"></span><code>            return REGIONS[i].name;</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m7"><span class="cw-no"></span><code>    return "UNKNOWN";</code><span class="cw-tip">越界兜底</span></div>
+<div class="cw-line" data-step="m7"><span class="cw-no"></span><code>}</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m8"><span class="cw-no"></span><code>#if 0</code><span class="cw-tip">编译不进固件</span></div>
+<div class="cw-line" data-step="m8"><span class="cw-no"></span><code>void never_do_this(void)</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m8"><span class="cw-no"></span><code>{</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m8"><span class="cw-no"></span><code>    *(volatile uint8_t *)0x08000000UL = 0x00;</code><span class="cw-tip">写 Flash → HardFault</span></div>
+<div class="cw-line" data-step="m8"><span class="cw-no"></span><code>}</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="m8"><span class="cw-no"></span><code>#endif</code><span class="cw-tip"></span></div>
+        </div>
+        <div class="cw-notes">
+<div class="cw-card" data-step="m1"><div class="cw-h">① const 全进 Flash</div><p>段码表、版本字符串都是 <code>const</code>，编译期定值，直接嵌进 Flash 的 <code>.rodata</code>。它们掉电不丢，但运行时改不了——要改就得搬进 RAM 副本。</p></div>
+<div class="cw-card" data-step="m2"><div class="cw-h">② 有初值的全局：一份数据，两个位置</div><p><code>g_tick</code>、<code>g_cal_k</code> 初值存在 Flash，运行时副本在 SRAM 的 <code>.data</code>。上电时启动代码把它拷过去，所以它物理上占两份空间。</p></div>
+<div class="cw-card" data-step="m3"><div class="cw-h">③ 无初值的全局：只占 RAM，不占 Flash</div><p><code>g_dma_buf[512]</code> 是 1KB，全在 <code>.bss</code>。它只在段表里记长度，镜像里一个字节都没有——这就是为什么“多加个没初始化的数组”不撑大固件，只吃 RAM。</p></div>
+<div class="cw-card" data-step="m4"><div class="cw-h">④ 三个宏，就是三个地址</div><p><code>0x4002_1018</code> 是 RCC 的 APB2 时钟使能，<code>0x4001_1004/0C</code> 是 GPIOC 的配置与输出。宏只是把地址包成可读的名字，<b>必须 volatile</b>——它们的值会被硬件改。</p></div>
+<div class="cw-card" data-step="m5"><div class="cw-h">⑤ 初始化三步，缺一不可</div><p>① <code>RCC_APB2ENR |= 1&lt;&lt;4</code> 开 GPIOC 时钟——<b>不开时钟，后面写寄存器全部无效且不报错</b>；② 清 PC13 那 4 位，掩码必须是 <code>0xF</code>；③ 写入推挽 50MHz（<code>0x3</code>）。</p></div>
+<div class="cw-card" data-step="m6"><div class="cw-h">⑥ 输出电平：直接改 ODR</div><p>PC13 在 CRH 的第 5 个 4 位组（<code>13-8=5</code>，偏移 20 位）。这里用 ODR 直写是为了演示；工程里更规范的是 BSRR——单次写、原子、不影响其它脚。</p></div>
+<div class="cw-card" data-step="m7"><div class="cw-h">⑦ 分区判定：纯算术，不碰硬件</div><p>拿地址和每段的 <code>[base, end)</code> 比大小——左闭右开，所以 <code>0x0800_FFFF</code> 命中、<code>0x0801_0000</code> 落 UNKNOWN。这段能原样在 PC 上跑，用于单测边界。</p></div>
+<div class="cw-card" data-step="m8"><div class="cw-h">⑧ 反例：为什么用 #if 0 包着</div><p>往 <code>0x0800_0000</code> 直接赋值会触发总线错误 → <b>HardFault</b>，板子当场死。F103 没有 MMU，不会像 PC 那样给你一个“访问违例”的错误码。放 <code>#if 0</code> 里是为了让人看见它、又不会真的编进去。</p></div>
+        </div>
+      </div>
 
       <figure class="code">
         <figcaption><span class="fname">编译 + 运行验证</span><span class="note">PC 分区测试 + Keil 编译器</span></figcaption>
