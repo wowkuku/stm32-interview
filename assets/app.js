@@ -141,3 +141,64 @@
     wireProgress();
   });
 })();
+/* ---------- 左码右讲联动（.codewalk） ---------- */
+(function () {
+  function initCodeWalk() {
+    var boxes = document.querySelectorAll('.codewalk');
+    for (var b = 0; b < boxes.length; b++) {
+      (function (box) {
+        var lines = box.querySelectorAll('.cw-line');
+        var cards = box.querySelectorAll('.cw-card');
+        for (var i = 0; i < lines.length; i++) {
+          var no = lines[i].querySelector('.cw-no');
+          if (no) no.textContent = i + 1;
+        }
+        function pick(step, fromLine) {
+          for (var j = 0; j < lines.length; j++) {
+            lines[j].classList.toggle('on', lines[j].getAttribute('data-step') === step);
+          }
+          for (var k = 0; k < cards.length; k++) {
+            cards[k].classList.toggle('on', cards[k].getAttribute('data-step') === step);
+          }
+          if (fromLine) {
+            var card = box.querySelector('.cw-card[data-step="' + step + '"]');
+            if (card && card.scrollIntoView) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+        }
+        for (var m = 0; m < lines.length; m++) {
+          (function (el) {
+            el.addEventListener('click', function () { pick(el.getAttribute('data-step'), true); });
+          })(lines[m]);
+        }
+        for (var n = 0; n < cards.length; n++) {
+          (function (el) {
+            el.addEventListener('click', function () { pick(el.getAttribute('data-step'), false); });
+          })(cards[n]);
+        }
+        if (lines.length) pick(lines[0].getAttribute('data-step'), false);
+
+        var btn = box.querySelector('.cw-copy');
+        if (btn) {
+          btn.addEventListener('click', function () {
+            var txt = [];
+            for (var p = 0; p < lines.length; p++) {
+              var c = lines[p].querySelector('code');
+              if (c) txt.push(c.textContent);
+            }
+            var s = txt.join('\n');
+            var done = function () {
+              var old = btn.textContent;
+              btn.textContent = '已复制';
+              setTimeout(function () { btn.textContent = old; }, 1200);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(s).then(done, done);
+            } else { done(); }
+          });
+        }
+      })(boxes[b]);
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initCodeWalk);
+  else initCodeWalk();
+})();
