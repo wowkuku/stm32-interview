@@ -17,7 +17,7 @@
    ② 30 秒版答案   现场张口就来的那段，先给结论
    ③ 思路解析      4 张内联 SVG（硅片归属图 / 总线结构 / 地址空间 / 烧录与上电对比）
                    + 1 个交互件"变量落点查询器"（文件末尾内联 script 实现）
-   ④ 可运行源码    裸寄存器 + PC 侧验证程序；代码块为节选，完整版见 code/
+   ④ 可运行源码    首个代码块为「左码右讲」联动组件（.codewalk）；其余代码块为节选，完整版见 code/
    ⑤ 关键要点      5 条，带编号
    ⑥ 追问与扣分点  面试官会接着问什么、哪些答法减分
    页尾一句"记忆锚"，用于复述。
@@ -392,56 +392,61 @@
       <h2 id="code" data-toc="4 · 可运行源码">可运行源码</h2>
       <p>两段代码，都能在本机实跑：<b>PC 侧</b>用 Windows 的 <code>VirtualQuery</code> 把"只读"变成可验证的页属性；<b>MCU 侧</b>给出 F103 的各种变量落点，并且<b>已用 Keil AC5 / AC6 编过，0 错 0 警告</b>。</p>
 
-      <figure class="code">
-        <figcaption><span class="fname">mem_sections_pc.c</span><span class="note">节选（完整版见 code/）· gcc 编译运行</span><button class="copy" type="button">复制</button></figcaption>
-        <pre><code class="lang-c">#include &lt;stdio.h&gt;
-#include &lt;stdlib.h&gt;
-#include &lt;windows.h&gt;
-
-const int  g_const_tab[3] = { 1, 2, 3 };   /* const 全局 → .rdata（只读数据段） */
-int        g_init = 42;                    /* 已初始化全局 → .data */
-int        g_zero;                         /* 未初始化全局 → .bss */
-static int g_static_init = 7;
-
-void some_func(void) { }                   /* 函数体 → .text */
-
-static const char *prot_str(DWORD p)
-{
-    switch (p) {
-    case PAGE_READONLY:          return "PAGE_READONLY   只读";
-    case PAGE_READWRITE:         return "PAGE_READWRITE  可读写";
-    case PAGE_EXECUTE_READ:      return "PAGE_EXECUTE_READ 可执行只读";
-    case PAGE_WRITECOPY:         return "PAGE_WRITECOPY  写时复制";
-    default:                     return "其它";
-    }
-}
-
-static void show(const char *what, const void *addr, const char *note)
-{
-    MEMORY_BASIC_INFORMATION mbi;
-    if (VirtualQuery(addr, &amp;mbi, sizeof mbi) == 0) return;
-    printf("  %-24s %p   页属性 = %-38s  %s\n",
-           what, addr, prot_str(mbi.Protect), note);
-}
-
-int main(void)
-{
-    int   local = 1;                       /* 栈 */
-    int  *heap  = (int *)malloc(16);       /* 堆 */
-    const char *lit = "hello";             /* 字符串字面量 → .rdata */
-
-    show("函数 some_func()",  (const void *)some_func,  "代码段 .text");
-    show("const g_const_tab[]", g_const_tab,            "只读数据 → 对应 MCU 的 Flash");
-    show("字面量 \"hello\"",    lit,                     "只读数据 .rdata");
-    show("全局 g_init",        &amp;g_init,                 "数据段 .data → 运行时在 RAM");
-    show("全局 g_zero",        &amp;g_zero,                 "BSS 段 .bss  → 运行时在 RAM");
-    show("局部 local",         &amp;local,                  "栈 stack");
-    show("malloc 返回 heap",   heap,                     "堆 heap");
-
-    free(heap);
-    return 0;
-}</code></pre>
-      </figure>
+      <div class="codewalk">
+        <div class="cw-head"><span class="cw-fname">mem_sections_pc.c</span><span class="cw-note">左侧逐行 · 右侧讲解 · 点任一侧，另一边同步高亮</span><button class="cw-copy" type="button">复制代码</button></div>
+        <div class="cw-code">
+<div class="cw-line" data-step="s1"><span class="cw-no"></span><code>#include &lt;stdio.h&gt;</code><span class="cw-tip">printf 的声明</span></div>
+<div class="cw-line" data-step="s1"><span class="cw-no"></span><code>#include &lt;stdlib.h&gt;</code><span class="cw-tip">malloc / free</span></div>
+<div class="cw-line" data-step="s1"><span class="cw-no"></span><code>#include &lt;windows.h&gt;</code><span class="cw-tip">VirtualQuery 在这</span></div>
+<div class="cw-line" data-step="s2"><span class="cw-no"></span><code>const int  g_const_tab[3] = { 1, 2, 3 };</code><span class="cw-tip">const 全局：.rdata</span></div>
+<div class="cw-line" data-step="s2"><span class="cw-no"></span><code>int        g_init = 42;</code><span class="cw-tip">有初值：.data</span></div>
+<div class="cw-line" data-step="s2"><span class="cw-no"></span><code>int        g_zero;</code><span class="cw-tip">无初值：.bss</span></div>
+<div class="cw-line" data-step="s2"><span class="cw-no"></span><code>static int g_static_init = 7;</code><span class="cw-tip">static 只改作用域</span></div>
+<div class="cw-line" data-step="s3"><span class="cw-no"></span><code>void some_func(void) { }</code><span class="cw-tip">函数体 → .text</span></div>
+<div class="cw-line" data-step="s4"><span class="cw-no"></span><code>static const char *prot_str(DWORD p)</code><span class="cw-tip">把数字翻译成人话</span></div>
+<div class="cw-line" data-step="s4"><span class="cw-no"></span><code>{</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="s4"><span class="cw-no"></span><code>    switch (p) {</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="s4"><span class="cw-no"></span><code>    case PAGE_READONLY:     return "PAGE_READONLY   只读";</code><span class="cw-tip">只读页</span></div>
+<div class="cw-line" data-step="s4"><span class="cw-no"></span><code>    case PAGE_READWRITE:    return "PAGE_READWRITE  可读写";</code><span class="cw-tip">可读写页</span></div>
+<div class="cw-line" data-step="s4"><span class="cw-no"></span><code>    case PAGE_EXECUTE_READ: return "EXECUTE_READ 可执行只读";</code><span class="cw-tip">可执行页</span></div>
+<div class="cw-line" data-step="s4"><span class="cw-no"></span><code>    case PAGE_WRITECOPY:    return "PAGE_WRITECOPY  写时复制";</code><span class="cw-tip">.data 的真实属性</span></div>
+<div class="cw-line" data-step="s4"><span class="cw-no"></span><code>    default:                return "其它";</code><span class="cw-tip">兜底</span></div>
+<div class="cw-line" data-step="s4"><span class="cw-no"></span><code>    }</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="s4"><span class="cw-no"></span><code>}</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="s5"><span class="cw-no"></span><code>static void show(const char *what, const void *addr, const char *note)</code><span class="cw-tip">统一打印一行</span></div>
+<div class="cw-line" data-step="s5"><span class="cw-no"></span><code>{</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="s5"><span class="cw-no"></span><code>    MEMORY_BASIC_INFORMATION mbi;</code><span class="cw-tip">装查询结果</span></div>
+<div class="cw-line" data-step="s5"><span class="cw-no"></span><code>    if (VirtualQuery(addr, &amp;mbi, sizeof mbi) == 0) return;</code><span class="cw-tip">★ 证据来自系统</span></div>
+<div class="cw-line" data-step="s5"><span class="cw-no"></span><code>    printf("  %-24s %p   页属性 = %-38s  %s\n",</code><span class="cw-tip">格式化输出</span></div>
+<div class="cw-line" data-step="s5"><span class="cw-no"></span><code>           what, addr, prot_str(mbi.Protect), note);</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="s5"><span class="cw-no"></span><code>}</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="s6"><span class="cw-no"></span><code>int main(void)</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="s6"><span class="cw-no"></span><code>{</code><span class="cw-tip"></span></div>
+<div class="cw-line" data-step="s6"><span class="cw-no"></span><code>    int   local = 1;</code><span class="cw-tip">普通局部 → 栈</span></div>
+<div class="cw-line" data-step="s6"><span class="cw-no"></span><code>    int  *heap  = (int *)malloc(16);</code><span class="cw-tip">malloc → 堆</span></div>
+<div class="cw-line" data-step="s6"><span class="cw-no"></span><code>    const char *lit = "hello";</code><span class="cw-tip">字面量 → .rdata</span></div>
+<div class="cw-line" data-step="s7"><span class="cw-no"></span><code>    show("函数 some_func()", (const void *)some_func, "代码段 .text");</code><span class="cw-tip">代码段</span></div>
+<div class="cw-line" data-step="s7"><span class="cw-no"></span><code>    show("const g_const_tab[]", g_const_tab, "只读 → 对应 Flash");</code><span class="cw-tip">只读数据</span></div>
+<div class="cw-line" data-step="s7"><span class="cw-no"></span><code>    show("字面量 hello", lit, "只读数据 .rdata");</code><span class="cw-tip">字面量</span></div>
+<div class="cw-line" data-step="s7"><span class="cw-no"></span><code>    show("全局 g_init", &amp;g_init, "数据段 .data");</code><span class="cw-tip">数据段</span></div>
+<div class="cw-line" data-step="s7"><span class="cw-no"></span><code>    show("全局 g_zero", &amp;g_zero, "BSS 段 .bss");</code><span class="cw-tip">BSS 段</span></div>
+<div class="cw-line" data-step="s7"><span class="cw-no"></span><code>    show("局部 local", &amp;local, "栈 stack");</code><span class="cw-tip">栈</span></div>
+<div class="cw-line" data-step="s7"><span class="cw-no"></span><code>    show("malloc 返回 heap", heap, "堆 heap");</code><span class="cw-tip">堆</span></div>
+<div class="cw-line" data-step="s8"><span class="cw-no"></span><code>    free(heap);</code><span class="cw-tip">成对释放</span></div>
+<div class="cw-line" data-step="s8"><span class="cw-no"></span><code>    return 0;</code><span class="cw-tip"></span></div>
+        </div>
+        <div class="cw-notes">
+<div class="cw-card" data-step="s1"><div class="cw-h">① 三个头文件，各管一件事</div><p><code>stdio.h</code> 给 <code>printf</code>，<code>stdlib.h</code> 给 <code>malloc/free</code>，<code>windows.h</code> 给 <code>VirtualQuery</code>。最后这个是本程序的关键——没有它就只能“听说”页属性，没法“查证”。Linux 上对应的是读 <code>/proc/self/maps</code>。</p></div>
+<div class="cw-card" data-step="s2"><div class="cw-h">② 四种全局变量，四个落点</div><p><code>const</code> 全局进 <code>.rdata</code>（只读页）；有初值的进 <code>.data</code>；没初值的进 <code>.bss</code>；<code>static</code> 只改变可见范围，<b>段不因此改变</b>。这四行是整页结论的源头。</p></div>
+<div class="cw-card" data-step="s3"><div class="cw-h">③ 函数体落在代码段</div><p><code>.text</code> 是“可执行 + 只读”页。这一条解释了为什么改数据可以、改代码不行——不是语言限制，是操作系统把那片内存页标成了只读。</p></div>
+<div class="cw-card" data-step="s4"><div class="cw-h">④ 把数字翻译成人话</div><p><code>VirtualQuery</code> 返回的是 <code>Protect</code> 一个 DWORD 掩码，不翻译根本看不懂。注意 <code>PAGE_WRITECOPY</code>——它就是 <code>.data</code> 在 Windows 上的真实属性：写时复制。</p></div>
+<div class="cw-card" data-step="s5"><div class="cw-h">⑤ 证据来源：问操作系统</div><p>整页所有“只读/可读写”的结论，都由这一行 <code>VirtualQuery</code> 产出。它不是我的推断，是操作系统返回的页表属性——所以那串数字可以当证据用。</p></div>
+<div class="cw-card" data-step="s6"><div class="cw-h">⑥ 三种局部数据，三个落点</div><p>普通局部变量在<b>栈</b>，<code>malloc</code> 在<b>堆</b>，而字符串字面量 <code>"hello"</code> <b>不在栈上</b>，它落在只读的 <code>.rdata</code>——这就是“改字面量会崩”的原因。</p></div>
+<div class="cw-card" data-step="s7"><div class="cw-h">⑦ 一次打一个，逐个对照</div><p>七个 <code>show</code> 覆盖代码段 / 只读数据 / 数据段 / BSS / 栈 / 堆，输出正好是一张完整的对照表。看输出时按这个顺序读，结论自然就出来了。</p></div>
+<div class="cw-card" data-step="s8"><div class="cw-h">⑧ 收尾</div><p><code>free</code> 释放堆。本程序不释放也不影响结果（进程退出时系统统一回收），但工程代码里必须成对出现，这是习惯问题，也是面试常问的细节。</p></div>
+        </div>
+      </div>
+      <p class="note-line">滚轮在左侧看代码，点击任意一行 → 右侧对应讲解自动滚到可见并高亮；反过来点右侧卡片，左侧所属代码行一起亮。想复制整段，用右上角按钮。</p>
 
       <figure class="code">
         <figcaption><span class="fname">本机实跑输出</span><span class="note">gcc 16.1.0 · Windows</span></figcaption>
