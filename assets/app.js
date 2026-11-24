@@ -26,7 +26,7 @@
   }
 
   function highlightAll() {
-    var blocks = document.querySelectorAll('figure.code code');
+    var blocks = document.querySelectorAll('figure.code code, .cw-line code');
     for (var i = 0; i < blocks.length; i++) {
       var el = blocks[i];
       /* 允许用 data-raw 关掉着色（例如伪代码/输出） */
