@@ -14,7 +14,7 @@
 ```
 stm32-interview/
 ├─ index.html                     目录页（人工维护题目列表 + 计数）
-├─ 00-示例-GPIO推挽与开漏.html      格式示例页（非题号，用于定版式）
+├─ 00-demo-gpio-push-pull.html      格式示例页（非题号，用于定版式）
 ├─ 01-ROM-RAM-Register.html         正式题号页，文件名 = NN-英文短名.html
 ├─ assets/
 │   ├─ style.css                  全部样式（浅色主题，CSS 变量在 :root）
@@ -66,7 +66,7 @@ stm32-interview/
 
 | 文件 | 主题 | 交互件 |
 |---|---|---|
-| `00-示例-GPIO推挽与开漏.html` | 推挽/开漏本质 + CRL 位域 | CRL 位域拆解器 |
+| `00-demo-gpio-push-pull.html` | 推挽/开漏本质 + CRL 位域 | CRL 位域拆解器 |
 | `01-ROM-RAM-Register.html` | 存储体系、地址空间、.data/.bss、volatile | 变量落点查询器 |
 
 ## 7. 校验方式（改动页面后至少跑一次）
@@ -79,3 +79,11 @@ msedge --headless=new --dump-dom "file:///<页面路径>" | grep -c "tk-k"
 # SVG 文本不越界
 #（用 python 正则估文本宽度对比 viewBox 宽高，见交付记录）
 ```
+
+## 8. 托管与在线编辑（GitHub Pages）
+
+- 托管：**GitHub Pages**，仓库 `wowkuku/stm32-interview`（public），站点根目录 = 仓库根目录。
+- 网址：**https://wowkuku.github.io/stm32-interview/**
+- 在线改内容：仓库页打开文件 → 右上角铅笔 → 改 → Commit changes，约 1 分钟自动部署。
+- 本地改：`git clone` → 改 → `git push`，推送即触发部署。
+- 仓库即唯一源，没有另存的本地副本；`.nojekyll` 用于关闭 Jekyll，保证文件原样托管。
