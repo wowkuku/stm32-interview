@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<!--
+================================================================================
+ [项目] STM32 面试题精讲 · 可视化讲解网页系列
+ [本页] Q01 · ROM / RAM / Register 的概念与作用（原题 1.2.1.3）
+ [生成] 2026-11-24　｜　同目录 README.md 是项目总说明，改代码前先读它
+================================================================================
+
+ [目的]
+   把学习者提出的 STM32 问题改写成面试高频考法，做成一个可离线打开的单页讲解。
+   读者对象：正在准备嵌入式面试、需要一个"考前扫一眼就能复述"的版本，而不是教科书。
+   本页要回答的原始问题：ROM、RAM、Register 的概念和作用；三者在硅片上的物理归属；
+   代码里一个变量究竟落在 Flash 还是 SRAM。
+
+ [页面结构] 固定六块，顺序不许调换
+   ① 面试题干      改写成面试官真会问的样子，标注考察点与追问层
+   ② 30 秒版答案   现场张口就来的那段，先给结论
+   ③ 思路解析      4 张内联 SVG（硅片归属图 / 总线结构 / 地址空间 / 烧录与上电对比）
+                   + 1 个交互件"变量落点查询器"（文件末尾内联 script 实现）
+   ④ 可运行源码    裸寄存器 + PC 侧验证程序；代码块为节选，完整版见 code/
+   ⑤ 关键要点      5 条，带编号
+   ⑥ 追问与扣分点  面试官会接着问什么、哪些答法减分
+   页尾一句"记忆锚"，用于复述。
+
+ [技术结构]
+   1 零依赖：无 CDN、无框架、无外链字体，双击本文件即可离线打开。
+   2 assets/style.css  全部样式，浅色主题，配色与圆角集中在 :root 变量。
+   3 assets/app.js     四件事：C 代码轻量着色、代码块复制按钮、
+                       左侧目录自动生成并随滚动高亮、顶部阅读进度条。
+   4 本页专属脚本：文件尾部 <script>，只有"变量落点查询器"一段，纯原生 JS。
+   5 目录页 index.html 由人工维护题目列表；新增页面后必须在那里补一条 <a class="pitem">。
+
+ [使用方式]
+   双击 html 打开；代码块右上角按钮可复制；左侧目录随滚动高亮；
+   交互件：点开下拉选项，下方"落点 / 段 / 掉电 / 可写 / 说明"即时更新。
+
+ [事实口径]
+   芯片按 STM32F103（容量取 F103C8T6：64KB Flash、20KB SRAM）；寄存器地址取自 RM0008；
+   库以标准外设库为主，同时给裸寄存器写法。
+   页内数字均有来源：PC 侧结论来自 gcc 实跑输出，MCU 侧代码经 Keil AC5 / AC6 编译验证。
+   改数字前先复跑对应程序，不要凭记忆改。
+
+ [修改要求] 后来者（含 AI）必须遵守
+   1 不要删除或拆散 assets/ 两个共用文件，其他页面依赖它们。
+   2 页面内不要硬编码颜色（内联 SVG 的 fill 除外），统一走 CSS 变量。
+   3 代码块的 HTML 特殊字符必须转义；不需要着色的块（编译输出、终端记录）加 data-raw。
+   4 正文用中文引号；代码与属性里的引号必须是 ASCII 直引号。
+   5 新增 h2 时补 id 与 data-toc，左侧目录会自动收录。
+   6 新增题目页：复制本文件结构，命名 NN-英文短名.html，六块顺序不变，并同步 index.html。
+   7 本 HTML 注释内禁止出现连续两个英文字符减号，否则注释边界会失效；分隔线统一用等号。
+================================================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Q01 · ROM / RAM / Register · STM32 面试题精讲</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div id="progress"></div>
+
+<div class="topbar">
+  <div class="inner">
+    <a class="home" href="index.html">← 题目列表</a>
+    <span class="crumb">Q01 · <b>ROM / RAM / Register 的概念与作用</b></span>
+    <span class="chip w" style="margin-left:auto">高频 ★★★★★</span>
+  </div>
+</div>
+
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-title">本页目录</div>
+    <nav id="toc"></nav>
+  </aside>
+
+  <main>
+    <div class="hero">
+      <div class="tagrow">
+        <span class="chip b">存储体系</span>
+        <span class="chip b">地址空间</span>
+        <span class="chip t">F103 口径</span>
+        <span class="chip ghost">原题 1.2.1.3</span>
+      </div>
+      <h1><span class="qno">Q01 ·</span> ROM、RAM、Register 三者在嵌入式里到底怎么分工？</h1>
+      <p class="sub">你原本的答案（ROM 像硬盘、RAM 像内存、Register 暂存数据）方向是对的，但面试官不会停在"像什么"上——他会接着问"那你的 const 数组在哪""外设寄存器算不算存储器""为什么全局变量的初值要存在 Flash 里"。</p>
+    </div>
+
+    <!-- ============ 1 ============ -->
+    <section class="sec">
+      <h2 id="q" data-toc="1 · 面试题干">面试题干</h2>
+      <div class="qbox">
+        <div class="qlabel">面试官问</div>
+        <p class="qtext">说说嵌入式系统里 ROM、RAM、Register 的概念和作用。<br>
+        它们各自适合放什么？如果让你指着代码里的一个变量说出它住在哪，你怎么判断？</p>
+        <p class="qsub">考察点：<b>掉电特性 / 可写性 / 速度成本梯度</b> 三条线，以及能否落到自己的工程上。<br>
+        这题是"送分题"，但也是"分层题"——答三句是及格，答出后四条追问才是满分。</p>
+      </div>
+      <div class="callout warn">
+        <span class="ct">先纠一个说法</span>
+        "ROM 是只读存储器"在 MCU 里要打个补丁：<b>你板子上的 ROM 实际是 Flash，它是可擦写的</b>，只是擦除以"页"为单位、寿命有限（F103 约 1 万次擦写）。叫它 ROM 是历史惯性，真正的只读存储器是出厂固化的 Bootloader 区（<code>0x1FFF_F000</code>）。
+      </div>
+    </section>
+
+    <!-- ============ 2 ============ -->
+    <section class="sec">
+      <h2 id="tldr" data-toc="2 · 30 秒版答案">30 秒版答案</h2>
+      <div class="tldr">
+        <div class="tl">面试现场就这么说</div>
+        <p>三者是<b>速度、成本、掉电特性</b>三个维度的取舍：<b>Register</b> 在 CPU 和外设内部，最快、最贵、掉电就丢，放"马上要用的"；<b>RAM（SRAM）</b>在片内，快、贵、掉电就丢，放"运行中会变的"——变量、栈、堆；<b>ROM（Flash）</b>慢、便宜、掉电不丢，放"不会变的"——代码和 const 常量。<br>
+        一句话：<b>Flash 存不变的，SRAM 存正在变的，寄存器存马上要用的。</b></p>
+      </div>
+    </section>
+
+    <!-- ============ 3 ============ -->
+    <section class="sec">
+      <h2 id="how" data-toc="3 · 思路解析">思路解析</h2>
+
+      <h3>3.1 先定位：它们分别在哪块硅片上</h3>
+      <p>问"这三个都在 CPU 内部吗"，说明已经开始想物理结构了，这是好方向。准确说法是：<b>只有内核寄存器真正在 CPU 内核内部；Flash 和 SRAM 是挂在总线上的独立存储模块，不算外设；外设寄存器住在外设模块里面。</b>三者同在一片硅上，但彼此没有包含关系。</p>
+
+      <svg viewBox="0 0 680 264" width="100%" role="img" aria-label="CPU 内核、片上存储、片上外设三者的物理归属示意图" style="font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif">
+        <text x="26" y="26" font-size="11.5" fill="#78849a">STM32F103 一颗芯片内（示意，真·同一片硅）</text>
+        <rect x="16" y="34" width="648" height="224" rx="14" fill="#fbfcfe" stroke="#cfd9e8" stroke-dasharray="5 4"/>
+
+        <!-- ① CPU 内核 -->
+        <rect x="34" y="56" width="190" height="150" rx="10" fill="#eef3ff" stroke="#bcd0f5"/>
+        <text x="129" y="80" font-size="12.5" font-weight="700" fill="#2563eb" text-anchor="middle">① CPU 内核</text>
+        <text x="44" y="104" font-size="11" fill="#445064">R0–R15 / SP / LR / PC</text>
+        <text x="44" y="123" font-size="11" fill="#445064">xPSR / 特殊寄存器</text>
+        <text x="44" y="142" font-size="11" fill="#445064">NVIC / SysTick</text>
+        <line x1="44" y1="152" x2="214" y2="152" stroke="#c7d7fe" stroke-width="1"/>
+        <text x="44" y="172" font-size="11" fill="#2563eb" font-weight="600">没有地址（NVIC 除外）</text>
+        <text x="44" y="190" font-size="10.5" fill="#78849a">指令直接引用，1 个周期</text>
+
+        <!-- ② 片上存储 -->
+        <rect x="246" y="56" width="190" height="150" rx="10" fill="#fff7e8" stroke="#f3ddb4"/>
+        <text x="341" y="80" font-size="12.5" font-weight="700" fill="#b45309" text-anchor="middle">② 片上存储</text>
+        <text x="256" y="104" font-size="11" fill="#445064">Flash 64KB</text>
+        <text x="256" y="120" font-size="10.5" fill="#78849a">代码 / const / 初值副本</text>
+        <text x="256" y="142" font-size="11" fill="#445064">SRAM 20KB</text>
+        <text x="256" y="158" font-size="10.5" fill="#78849a">.data / .bss / 栈 / 堆</text>
+        <line x1="256" y1="168" x2="426" y2="168" stroke="#f3ddb4" stroke-width="1"/>
+        <text x="256" y="188" font-size="11" fill="#b45309" font-weight="600">独立存储模块</text>
+        <text x="256" y="200" font-size="10.5" fill="#78849a">不是外设</text>
+
+        <!-- ③ 片上外设 -->
+        <rect x="458" y="56" width="190" height="150" rx="10" fill="#f6f4ff" stroke="#ddd6fe"/>
+        <text x="553" y="80" font-size="12.5" font-weight="700" fill="#6d28d9" text-anchor="middle">③ 片上外设</text>
+        <text x="468" y="104" font-size="11" fill="#445064">GPIO / USART / TIM</text>
+        <text x="468" y="123" font-size="11" fill="#445064">ADC / I2C / SPI …</text>
+        <line x1="468" y1="134" x2="638" y2="134" stroke="#ddd6fe" stroke-width="1"/>
+        <text x="468" y="154" font-size="11" fill="#4c1d95" font-weight="600">每个模块内部各有</text>
+        <text x="468" y="172" font-size="11" fill="#4c1d95" font-weight="600">控制 / 状态寄存器</text>
+        <text x="468" y="192" font-size="10.5" fill="#78849a">映射到 0x4000_0000 起</text>
+
+        <!-- 归属结论 -->
+        <text x="34" y="228" font-size="11.5" font-weight="700" fill="#2563eb">归属：CPU 内部</text>
+        <text x="246" y="228" font-size="11.5" font-weight="700" fill="#b45309">归属：片上存储（CPU 外）</text>
+        <text x="458" y="228" font-size="11.5" font-weight="700" fill="#6d28d9">归属：片上外设（CPU 外）</text>
+        <text x="34" y="248" font-size="10.5" fill="#78849a">三者都在片内，但只有 ① 在 CPU 里；② 和 ③ 是 CPU 通过总线去访问的外部模块</text>
+      </svg>
+
+      <div class="callout warn">
+        <span class="ct">术语对不上会丢分</span>
+        ST 手册里，Flash / SRAM 归在 <b>Memory and bus architecture</b> 一章，GPIO / USART 归在 <b>Peripheral</b> 一章 —— 也就是说，<b>"外设"这个词本身就不包含 Flash 和 SRAM</b>。面试时你可以说"在片内"，但说"在 CPU 内"就只对内核寄存器成立。（唯一的小例外：NVIC 和 SysTick 属于内核，却有 PPB 地址 <code>0xE000_0000</code>。）
+      </div>
+
+      <h3>3.2 它们不是"三种硬盘"，而是挂在同一总线上的三个位置</h3>
+      <p>新手最容易把三者想成"三个不同的柜子"。真实结构是：<b>CPU 里有一小撮寄存器，外面挂一条总线，总线上接了 Flash、SRAM 和外设</b>。CPU 访问它们用的是<b>同一条 load/store 指令</b>，差别只在于它落在哪个地址、那个地址背后是什么器件。</p>
+
+      <svg viewBox="0 0 680 330" width="100%" role="img" aria-label="MCU 存储体系结构示意图" style="font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif">
+        <!-- CPU -->
+        <rect x="230" y="16" width="220" height="76" rx="10" fill="#eef3ff" stroke="#bcd0f5"/>
+        <text x="340" y="42" font-size="13.5" font-weight="700" fill="#2563eb" text-anchor="middle">Cortex-M3 内核</text>
+        <text x="340" y="62" font-size="11.5" fill="#445064" text-anchor="middle">R0–R15 / xPSR / 特殊寄存器</text>
+        <text x="340" y="79" font-size="10.5" fill="#78849a" text-anchor="middle">没有地址，汇编直接引用，1 个周期</text>
+        <line x1="340" y1="92" x2="340" y2="126" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#a2)"/>
+
+        <!-- 总线 -->
+        <rect x="60" y="126" width="560" height="34" rx="8" fill="#f3f6fb" stroke="#cfd9e8"/>
+        <text x="340" y="148" font-size="12" font-weight="600" fill="#445064" text-anchor="middle">AHB 总线矩阵 / APB 桥（同一套地址空间）</text>
+
+        <!-- 三个从设备 -->
+        <line x1="140" y1="160" x2="140" y2="196" stroke="#94a3b8" stroke-width="1.6"/>
+        <line x1="340" y1="160" x2="340" y2="196" stroke="#94a3b8" stroke-width="1.6"/>
+        <line x1="540" y1="160" x2="540" y2="196" stroke="#94a3b8" stroke-width="1.6"/>
+
+        <rect x="62" y="196" width="156" height="86" rx="9" fill="#fff7e8" stroke="#f3ddb4"/>
+        <text x="140" y="218" font-size="12.5" font-weight="700" fill="#b45309" text-anchor="middle">Flash（ROM 角色）</text>
+        <text x="140" y="237" font-size="11" fill="#445064" text-anchor="middle">0x0800_0000 起 64KB</text>
+        <text x="140" y="254" font-size="11" fill="#445064" text-anchor="middle">代码 + const + 初值副本</text>
+        <text x="140" y="271" font-size="10.5" fill="#78849a" text-anchor="middle">慢：72MHz 要 2 个等待周期</text>
+
+        <rect x="262" y="196" width="156" height="86" rx="9" fill="#e8f7f4" stroke="#bfe6e0"/>
+        <text x="340" y="218" font-size="12.5" font-weight="700" fill="#0d9488" text-anchor="middle">SRAM（RAM 角色）</text>
+        <text x="340" y="237" font-size="11" fill="#445064" text-anchor="middle">0x2000_0000 起 20KB</text>
+        <text x="340" y="254" font-size="11" fill="#445064" text-anchor="middle">.data / .bss / 栈 / 堆</text>
+        <text x="340" y="271" font-size="10.5" fill="#78849a" text-anchor="middle">快：通常 0 等待</text>
+
+        <rect x="462" y="196" width="156" height="86" rx="9" fill="#f6f4ff" stroke="#ddd6fe"/>
+        <text x="540" y="218" font-size="12.5" font-weight="700" fill="#6d28d9" text-anchor="middle">外设寄存器</text>
+        <text x="540" y="237" font-size="11" fill="#445064" text-anchor="middle">0x4000_0000 起</text>
+        <text x="540" y="254" font-size="11" fill="#445064" text-anchor="middle">GPIO / USART / TIM 配置</text>
+        <text x="540" y="271" font-size="10.5" fill="#78849a" text-anchor="middle">不是存储器，但能当地址访问</text>
+
+        <text x="60" y="312" font-size="11.5" fill="#445064">三者在同一地址空间里，CPU 用同一条 load/store 访问 —— 差别只在速度、可写性、掉电是否保持</text>
+        <defs>
+          <marker id="a2" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/>
+          </marker>
+        </defs>
+      </svg>
+
+      <div class="tablewrap">
+        <table class="t">
+          <thead>
+            <tr><th style="width:15%">维度</th><th>ROM（片内 Flash）</th><th>RAM（片内 SRAM）</th><th>Register</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>掉电</td><td><b>不丢</b></td><td>丢</td><td>丢（外设配置需重写）</td></tr>
+            <tr><td>可写方式</td><td>按页擦除后编程，约 1 万次寿命</td><td>随时按字节写，不限次数</td><td>随时写，单周期</td></tr>
+            <tr><td>访问速度</td><td>慢（72MHz 需 2 个等待周期 + 预取）</td><td>快（通常 0 等待）</td><td>最快（1 个周期）</td></tr>
+            <tr><td>容量（F103C8T6）</td><td>64 KB</td><td>20 KB</td><td>通用 16 个 + 若干特殊</td></tr>
+            <tr><td>每 bit 成本</td><td>低</td><td>高</td><td>极高（6 个晶体管存 1 bit）</td></tr>
+            <tr><td>放什么</td><td>代码、const 常量、.data 的初值副本</td><td>全局/静态变量、栈、堆</td><td>运算中间值、外设控制位</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>3.3 地址空间地图：判断"变量住在哪"的地图</h3>
+      <p>面试让你"指着变量说位置"，靠的就是这张图。F103 的地址空间是固定的，背下来不亏：</p>
+
+      <svg viewBox="0 0 680 292" width="100%" role="img" aria-label="STM32F103 地址空间分区图" style="font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif">
+        <text x="20" y="18" font-size="11.5" fill="#78849a">地址范围</text>
+        <text x="230" y="18" font-size="11.5" fill="#78849a">内容</text>
+        <text x="470" y="18" font-size="11.5" fill="#78849a">对应概念</text>
+
+        <rect x="16" y="26" width="200" height="34" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="26" y="47" font-size="10.5" font-family="Consolas,monospace" fill="#445064">0x0000_0000 – 0x0007_FFFF</text>
+        <rect x="226" y="26" width="230" height="34" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="236" y="47" font-size="11" fill="#445064">别名区（随 BOOT 引脚映射）</text>
+        <text x="470" y="47" font-size="11" fill="#78849a">—</text>
+
+        <rect x="16" y="66" width="200" height="34" rx="6" fill="#fff7e8" stroke="#f3ddb4"/>
+        <text x="26" y="87" font-size="10.5" font-family="Consolas,monospace" fill="#b45309">0x0800_0000 – 0x0800_FFFF</text>
+        <rect x="226" y="66" width="230" height="34" rx="6" fill="#fff7e8" stroke="#f3ddb4"/>
+        <text x="236" y="87" font-size="11" fill="#7a4a08">Flash 64KB：代码、const</text>
+        <text x="470" y="87" font-size="11" font-weight="600" fill="#b45309">ROM 角色</text>
+
+        <rect x="16" y="106" width="200" height="34" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="26" y="127" font-size="10.5" font-family="Consolas,monospace" fill="#445064">0x1FFF_F000 – 0x1FFF_F7FF</text>
+        <rect x="226" y="106" width="230" height="34" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="236" y="127" font-size="11" fill="#445064">系统存储区：出厂 Bootloader</text>
+        <text x="470" y="127" font-size="11" fill="#78849a">真正只读</text>
+
+        <rect x="16" y="146" width="200" height="34" rx="6" fill="#e8f7f4" stroke="#bfe6e0"/>
+        <text x="26" y="167" font-size="10.5" font-family="Consolas,monospace" fill="#0d9488">0x2000_0000 – 0x2000_4FFF</text>
+        <rect x="226" y="146" width="230" height="34" rx="6" fill="#e8f7f4" stroke="#bfe6e0"/>
+        <text x="236" y="167" font-size="11" fill="#0b5c56">SRAM 20KB：.data/.bss/栈/堆</text>
+        <text x="470" y="167" font-size="11" font-weight="600" fill="#0d9488">RAM 角色</text>
+
+        <rect x="16" y="186" width="200" height="34" rx="6" fill="#f6f4ff" stroke="#ddd6fe"/>
+        <text x="26" y="207" font-size="10.5" font-family="Consolas,monospace" fill="#6d28d9">0x4000_0000 – 0x4002_3FFF</text>
+        <rect x="226" y="186" width="230" height="34" rx="6" fill="#f6f4ff" stroke="#ddd6fe"/>
+        <text x="236" y="207" font-size="11" fill="#4c1d95">外设寄存器：GPIO/USART/TIM</text>
+        <text x="470" y="207" font-size="11" font-weight="600" fill="#6d28d9">内存映射 I/O</text>
+
+        <rect x="16" y="226" width="200" height="34" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="26" y="247" font-size="10.5" font-family="Consolas,monospace" fill="#445064">0xE000_0000 – 0xE00F_FFFF</text>
+        <rect x="226" y="226" width="230" height="34" rx="6" fill="#f8fafc" stroke="#e2e8f0"/>
+        <text x="236" y="247" font-size="11" fill="#445064">内核私有：NVIC / SysTick</text>
+        <text x="470" y="247" font-size="11" fill="#78849a">—</text>
+
+        <text x="16" y="282" font-size="11" fill="#78849a">注：容量按 F103C8T6（64KB Flash / 20KB SRAM）；换型号只改长度，起始地址不变。</text>
+      </svg>
+
+      <h3>3.4 烧录 vs 上电：Flash 里躺什么，SRAM 里怎么长出来</h3>
+      <p>这是整道题<b>最能拉开差距</b>的一段。面试官问"为什么全局变量的初值要存在 Flash 里"，答的其实就是下面这张图：</p>
+
+      <svg viewBox="0 0 680 320" width="100%" role="img" aria-label="烧录后 Flash 内容与上电后 SRAM 布局对比图" style="font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif">
+        <text x="40" y="26" font-size="12.5" font-weight="700" fill="#b45309">烧录后：Flash（0x0800_0000）</text>
+        <text x="404" y="26" font-size="12.5" font-weight="700" fill="#0d9488">上电后：SRAM（0x2000_0000）</text>
+
+        <!-- Flash 侧 -->
+        <rect x="40" y="40" width="230" height="228" rx="10" fill="#fffdf7" stroke="#f3ddb4"/>
+        <rect x="52" y="54" width="206" height="40" rx="6" fill="#fff" stroke="#e2e8f0"/>
+        <text x="62" y="72" font-size="11.5" font-weight="600" fill="#445064">.text　代码 + 中断向量表</text>
+        <text x="62" y="87" font-size="10" fill="#78849a">启动第一条指令就在这</text>
+
+        <rect x="52" y="100" width="206" height="40" rx="6" fill="#fff" stroke="#e2e8f0"/>
+        <text x="62" y="118" font-size="11.5" font-weight="600" fill="#445064">.rodata　const 常量</text>
+        <text x="62" y="133" font-size="10" fill="#78849a">段码表 / 字库 / 字符串</text>
+
+        <rect x="52" y="146" width="206" height="46" rx="6" fill="#fff7e8" stroke="#f3ddb4"/>
+        <text x="62" y="164" font-size="11.5" font-weight="600" fill="#b45309">.data 的初值副本</text>
+        <text x="62" y="180" font-size="10" fill="#7a4a08">只有"有初值的全局变量"才有这份</text>
+
+        <rect x="52" y="198" width="206" height="34" rx="6" fill="#f8fafc" stroke="#e2e8f0" stroke-dasharray="4 3"/>
+        <text x="62" y="219" font-size="11" fill="#94a3b8">（没有 .bss —— 它没有内容可存）</text>
+        <text x="52" y="256" font-size="10.5" fill="#78849a">整片可掉电保持，容量 64KB</text>
+
+        <!-- 箭头 -->
+        <path d="M258,168 C300,168 306,140 344,140" fill="none" stroke="#b45309" stroke-width="1.6" marker-end="url(#a3)"/>
+        <text x="268" y="112" font-size="10.5" fill="#b45309">启动时 memcpy</text>
+        <path d="M258,215 C300,215 306,238 344,238" fill="none" stroke="#64748b" stroke-width="1.6" stroke-dasharray="4 3" marker-end="url(#a3)"/>
+        <text x="264" y="262" font-size="10.5" fill="#64748b">整段清零</text>
+
+        <!-- SRAM 侧 -->
+        <rect x="404" y="40" width="230" height="228" rx="10" fill="#f7fdfc" stroke="#bfe6e0"/>
+        <rect x="416" y="54" width="206" height="34" rx="6" fill="#e8f7f4" stroke="#bfe6e0"/>
+        <text x="426" y="70" font-size="11.5" font-weight="600" fill="#0b5c56">栈 stack　顶 = __initial_sp</text>
+        <text x="426" y="84" font-size="10" fill="#0d9488">局部变量、函数返回地址，向下长</text>
+
+        <rect x="416" y="94" width="206" height="40" rx="6" fill="#e8f7f4" stroke="#bfe6e0"/>
+        <text x="426" y="112" font-size="11.5" font-weight="600" fill="#0b5c56">堆 heap</text>
+        <text x="426" y="127" font-size="10" fill="#0d9488">malloc 向上长，和栈相向而行</text>
+
+        <rect x="416" y="140" width="206" height="40" rx="6" fill="#e8f7f4" stroke="#bfe6e0"/>
+        <text x="426" y="158" font-size="11.5" font-weight="600" fill="#0b5c56">.data　变量（初值已拷入）</text>
+        <text x="426" y="173" font-size="10" fill="#0d9488">运行中随便改，掉电即丢</text>
+
+        <rect x="416" y="186" width="206" height="40" rx="6" fill="#e8f7f4" stroke="#bfe6e0"/>
+        <text x="426" y="204" font-size="11.5" font-weight="600" fill="#0b5c56">.bss　未初始化变量</text>
+        <text x="426" y="219" font-size="10" fill="#0d9488">上电清零，不占 Flash 体积</text>
+
+        <text x="416" y="256" font-size="10.5" fill="#78849a">容量 20KB，掉电全丢</text>
+
+        <defs>
+          <marker id="a3" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/>
+          </marker>
+        </defs>
+        <text x="40" y="296" font-size="11" fill="#445064">这两步都在 <tspan font-family="Consolas,monospace" fill="#b45309">main()</tspan> 之前完成：Keil 里由 <tspan font-family="Consolas,monospace" fill="#b45309">__main → __scatterload</tspan> 负责搬运和清零。</text>
+      </svg>
+
+      <div class="callout good">
+        <span class="ct">所以"初值存在 Flash"不是浪费，是必须</span>
+        RAM 掉电就丢，要是初值只存在 RAM 里，复位之后 <code>int g_cal_k = 1024;</code> 就变成随机数了。<b>初值固化在 Flash，运行副本在 SRAM</b> —— 一个变量在物理上有两份数据。
+      </div>
+
+      <h3>3.5 Register 的两种身份（这道题的第二层）</h3>
+      <p>只说"寄存器暂存指令和数据"会被追问打回。<b>寄存器分两类，性质完全不同</b>：</p>
+
+      <div class="tablewrap">
+        <table class="t">
+          <thead><tr><th style="width:20%">维度</th><th>内核寄存器</th><th>外设寄存器</th></tr></thead>
+          <tbody>
+            <tr><td>位置</td><td>CPU 内核内部</td><td>各外设模块内部（GPIO/USART…）</td></tr>
+            <tr><td>有没有地址</td><td><b>没有</b>，汇编直接引用 <code>R0</code></td><td><b>有</b>，如 <code>0x4001_0800</code></td></tr>
+            <tr><td>C 语言能否用指针访问</td><td>不能（<code>register</code> 关键字取地址都编译不过）</td><td>能，必须加 <code>volatile</code></td></tr>
+            <tr><td>数量</td><td>R0–R12、SP、LR、PC + xPSR 等十几个</td><td>每个外设几十个控制/状态位</td></tr>
+            <tr><td>谁修改它</td><td>指令执行时由 CPU 写</td><td>程序写；<b>硬件也会自己改</b>（如状态位）</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout warn">
+        <span class="ct">volatile 一句话解释</span>
+        外设寄存器的值<b>会被硬件悄悄改</b>（比如串口收到数据，<code>USART_SR</code> 的 RXNE 自己置 1）。不加 <code>volatile</code>，编译器认为"这个变量没人动过"，会把多次读取合并成一次，或者干脆优化掉 —— 于是你就会遇到"程序一直等不到标志位"这种经典 bug。
+      </div>
+
+      <div class="widget">
+        <h4>变量落点查询器 —— 随便点一个，看它住在哪</h4>
+        <p class="wsub">面试官让你"指着变量说位置"时，按这个表答。掉电列尤其容易被追问。</p>
+        <div class="wrow">
+          <div class="wfield" style="min-width:280px">
+            <label for="vkind">变量 / 数据的种类</label>
+            <select id="vkind">
+              <option value="0">const 全局数组（如段码表）</option>
+              <option value="1">字符串字面量 "hello"</option>
+              <option value="2">有初值的全局变量 int g = 42</option>
+              <option value="3">无初值的全局变量 int g;</option>
+              <option value="4">函数里的局部变量</option>
+              <option value="5">malloc 出来的缓冲区</option>
+              <option value="6">外设寄存器 GPIOA-&gt;ODR</option>
+              <option value="7">内核寄存器 R0</option>
+              <option value="8">函数内 static 变量</option>
+            </select>
+          </div>
+        </div>
+        <div class="wout">
+          <div style="margin-bottom:6px">落点：<span class="modename" id="w_where">—</span></div>
+          <div style="margin-bottom:6px">段：<b id="w_sec">—</b>　·　掉电后：<b id="w_keep">—</b>　·　运行中可写：<b id="w_rw">—</b></div>
+          <div id="w_tip" style="color:#445064;font-size:13.5px">—</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 4 ============ -->
+    <section class="sec">
+      <h2 id="code" data-toc="4 · 可运行源码">可运行源码</h2>
+      <p>两段代码，都能在本机实跑：<b>PC 侧</b>用 Windows 的 <code>VirtualQuery</code> 把"只读"变成可验证的页属性；<b>MCU 侧</b>给出 F103 的各种变量落点，并且<b>已用 Keil AC5 / AC6 编过，0 错 0 警告</b>。</p>
+
+      <figure class="code">
+        <figcaption><span class="fname">mem_sections_pc.c</span><span class="note">节选（完整版见 code/）· gcc 编译运行</span><button class="copy" type="button">复制</button></figcaption>
+        <pre><code class="lang-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;windows.h&gt;
+
+const int  g_const_tab[3] = { 1, 2, 3 };   /* const 全局 → .rdata（只读数据段） */
+int        g_init = 42;                    /* 已初始化全局 → .data */
+int        g_zero;                         /* 未初始化全局 → .bss */
+static int g_static_init = 7;
+
+void some_func(void) { }                   /* 函数体 → .text */
+
+static const char *prot_str(DWORD p)
+{
+    switch (p) {
+    case PAGE_READONLY:          return "PAGE_READONLY   只读";
+    case PAGE_READWRITE:         return "PAGE_READWRITE  可读写";
+    case PAGE_EXECUTE_READ:      return "PAGE_EXECUTE_READ 可执行只读";
+    case PAGE_WRITECOPY:         return "PAGE_WRITECOPY  写时复制";
+    default:                     return "其它";
+    }
+}
+
+static void show(const char *what, const void *addr, const char *note)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    if (VirtualQuery(addr, &amp;mbi, sizeof mbi) == 0) return;
+    printf("  %-24s %p   页属性 = %-38s  %s\n",
+           what, addr, prot_str(mbi.Protect), note);
+}
+
+int main(void)
+{
+    int   local = 1;                       /* 栈 */
+    int  *heap  = (int *)malloc(16);       /* 堆 */
+    const char *lit = "hello";             /* 字符串字面量 → .rdata */
+
+    show("函数 some_func()",  (const void *)some_func,  "代码段 .text");
+    show("const g_const_tab[]", g_const_tab,            "只读数据 → 对应 MCU 的 Flash");
+    show("字面量 \"hello\"",    lit,                     "只读数据 .rdata");
+    show("全局 g_init",        &amp;g_init,                 "数据段 .data → 运行时在 RAM");
+    show("全局 g_zero",        &amp;g_zero,                 "BSS 段 .bss  → 运行时在 RAM");
+    show("局部 local",         &amp;local,                  "栈 stack");
+    show("malloc 返回 heap",   heap,                     "堆 heap");
+
+    free(heap);
+    return 0;
+}</code></pre>
+      </figure>
+
+      <figure class="code">
+        <figcaption><span class="fname">本机实跑输出</span><span class="note">gcc 16.1.0 · Windows</span></figcaption>
+        <pre><code data-raw>函数 some_func()       00007FF6B2831490   页属性 = PAGE_EXECUTE_READ 可执行只读   代码段 .text
+const g_const_tab[]    00007FF6B2834528   页属性 = PAGE_READONLY   只读          只读数据 ← 对应 Flash
+字符串字面量 "hello"    00007FF6B28341D6   页属性 = PAGE_READONLY   只读          只读数据
+全局 g_init(已初始化)   00007FF6B2833004   页属性 = PAGE_WRITECOPY  写时复制        .data
+静态 g_static_init     00007FF6B2833000   页属性 = PAGE_WRITECOPY  写时复制        .data
+全局 g_zero(未初始化)   00007FF6B2837030   页属性 = PAGE_READWRITE  可读写          .bss
+局部 local             0000006CBFBFFCEC   页属性 = PAGE_READWRITE  可读写          栈
+malloc 返回 heap       000001CD1E7D6880   页属性 = PAGE_READWRITE  可读写          堆
+
+栈与堆的生长方向:
+  外层局部变量地址 : 0000006CBFBFFCEC
+  内层局部变量地址 : 0000006CBFBFFCE8   =&gt; 栈向下（地址变小）增长:是
+  堆地址           : 000001CD1E7D6880   =&gt; 堆向上增长，与栈相向而行</code></pre>
+      </figure>
+
+      <div class="callout warn">
+        <span class="ct">输出里有个细节别放过：.data 显示的是 PAGE_WRITECOPY 而不是 READWRITE</span>
+        这就是 Windows 的"写时复制"：镜像里的 .data 页初始是共享只读的，<b>第一次写它时才复制一份私有页</b>，之后就可写。所以它既省内存、又保证各进程互不干扰。<b>结论不变</b>：普通全局变量是"可写"的，const 是"写就崩"的。MCU 上没有 MMU，所以没有这类花活——SRAM 一律可写，Flash 一律写不了。
+      </div>
+
+      <figure class="code">
+        <figcaption><span class="fname">mem_layout_stm32.c</span><span class="note">节选；文件末尾另有 HOST_TEST 分支供 PC 验证 · AC5/AC6 编译通过</span><button class="copy" type="button">复制</button></figcaption>
+        <pre><code class="lang-c">#include &lt;stdint.h&gt;
+
+/* ===== 1. 烧进 Flash 的：const 量 + 代码本身 ===== */
+const uint8_t seg7_map[10] = {           /* 段码表：全生命周期只读 */
+    0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F
+};
+const char fw_ver[] = "v1.0.3";          /* 字符串常量，同样在 Flash */
+
+/* ===== 2. 有初值的全局 → .data（初值另存 Flash，上电拷到 SRAM）===== */
+volatile uint32_t g_tick  = 0;
+uint16_t          g_cal_k = 1024;
+
+/* ===== 3. 无初值的全局 → .bss（上电清零，不占 Flash 体积）===== */
+uint16_t g_dma_buf[512];                 /* 1KB，全在 SRAM */
+uint32_t g_err_cnt;
+
+/* ===== 4. 外设寄存器：映射进地址空间，必须 volatile ===== */
+#define RCC_APB2ENR (*(volatile uint32_t *)0x40021018UL)
+#define GPIOC_CRH   (*(volatile uint32_t *)0x40011004UL)
+#define GPIOC_ODR   (*(volatile uint32_t *)0x4001100CUL)
+
+void led_pc13_init(void)
+{
+    RCC_APB2ENR |= (1UL &lt;&lt; 4);        /* 开 GPIOC 时钟 */
+    GPIOC_CRH   &amp;= ~(0xFUL &lt;&lt; 20);     /* PC13 在 CRH 第 (13-8)=5 个 4 位组 */
+    GPIOC_CRH   |=  (0x3UL &lt;&lt; 20);     /* 推挽 50MHz */
+}
+
+void led_pc13_set(int on)
+{
+    if (on) GPIOC_ODR &amp;= ~(1UL &lt;&lt; 13);
+    else    GPIOC_ODR |=  (1UL &lt;&lt; 13);
+}
+
+/* ===== 5. 分区判定：纯整数比较，PC 上也能跑 ===== */
+typedef struct { const char *name; uintptr_t base, end; } region_t;
+
+static const region_t REGIONS[] = {
+    { "Flash  (ROM role)", 0x08000000UL, 0x08010000UL },  /* F103C8T6: 64KB */
+    { "SRAM   (RAM role)", 0x20000000UL, 0x20005000UL },  /* F103C8T6: 20KB */
+    { "PERIPH MMIO      ", 0x40000000UL, 0x40024000UL },
+    { "CORE PRIVATE     ", 0xE0000000UL, 0xE0100000UL },
+};
+
+const char *region_of(uintptr_t addr)
+{
+    unsigned i;
+    for (i = 0; i &lt; sizeof(REGIONS) / sizeof(REGIONS[0]); i++)
+        if (addr &gt;= REGIONS[i].base &amp;&amp; addr &lt; REGIONS[i].end)
+            return REGIONS[i].name;
+    return "UNKNOWN";
+}
+
+/* ===== 6. 反例：往 Flash 地址直接赋值 ===== */
+#if 0
+void never_do_this(void)
+{
+    *(volatile uint8_t *)0x08000000UL = 0x00;   /* 总线错误 → HardFault */
+}
+#endif</code></pre>
+      </figure>
+
+      <figure class="code">
+        <figcaption><span class="fname">编译 + 运行验证</span><span class="note">PC 分区测试 + Keil 编译器</span></figcaption>
+        <pre><code data-raw># 1) PC 侧跑分区判定（gcc -DHOST_TEST）
+$ gcc -DHOST_TEST -O1 -Wall -Wextra mem_layout_stm32.c -o t &amp;&amp; ./t
+addr         -&gt; region
+0x08000000   -&gt; Flash  (ROM role)
+0x0800FFFF   -&gt; Flash  (ROM role)
+0x08010000   -&gt; UNKNOWN          &lt;-- 正好越过 Flash 末尾，边界正确
+0x20000000   -&gt; SRAM   (RAM role)
+0x20004FFF   -&gt; SRAM   (RAM role)
+0x4001080C   -&gt; PERIPH MMIO      &lt;-- GPIOA_ODR
+0xE000E010   -&gt; CORE PRIVATE     &lt;-- SysTick
+
+# 2) ARM 侧编译（本机 Keil_v5）
+$ armcc --cpu Cortex-M3 -c -O2 mem_layout_stm32.c
+mem_layout_stm32.c: 0 errors, 0 warnings
+$ armclang --target=arm-arm-none-eabi -mcpu=cortex-m3 -c -O2 mem_layout_stm32.c
+通过（无输出）</code></pre>
+      </figure>
+
+      <h3>在你自己的工程里怎么验证（Keil）</h3>
+      <ul class="plain">
+        <li><b>看四个数</b>：编译输出最后一行 <code>Program Size: Code=xxxx RO-data=xxxx RW-data=xxxx ZI-data=xxxx</code>。<br>
+          <b>Flash 占用 = Code + RO-data + RW-data</b>；<b>RAM 占用 = RW-data + ZI-data</b>。这条几乎必问。</li>
+        <li><b>看地址</b>：Debug 里把变量加到 Watch，右键看它的地址 —— <code>0x0800_xxxx</code> 就是 Flash，<code>0x2000_xxxx</code> 就是 SRAM。</li>
+        <li><b>看总量</b>：<code>Options for Target → Target</code> 里的 <code>IROM1 / IRAM1</code> 就是 Flash 与 SRAM 的起始地址和大小（MDK5 口径，菜单字样以你本机为准）。</li>
+        <li><b>看明细</b>：<code>Options for Target → Listing</code> 勾上 Linker Listing 的 Memory Map，编译后在 Listings 下找 <code>.map</code>，能看到每个函数、每个变量具体放在哪一段。</li>
+      </ul>
+    </section>
+
+    <!-- ============ 5 ============ -->
+    <section class="sec">
+      <h2 id="key" data-toc="5 · 关键要点">关键要点</h2>
+      <ul class="points">
+        <li><b>三条判断线</b>：掉不掉电、能不能随时写、快不快。ROM=不丢/要擦/慢，RAM=丢/随便写/快，寄存器=丢/随便写/最快。</li>
+        <li><b>MCU 上的 ROM 是 Flash</b>：可擦写、按页擦、寿命约 1 万次。"只读"是历史叫法，真正只读的是出厂 Bootloader 区。</li>
+        <li><b>一个变量可能有两份数据</b>：有初值的全局变量，初值在 Flash（<code>.data</code> 副本），运行副本在 SRAM。</li>
+        <li><b>寄存器分两类，且只有它在 CPU 内</b>：内核寄存器没有地址（汇编直接用），外设寄存器有地址（C 指针 + <code>volatile</code>）。Flash / SRAM 虽在片内，但不在 CPU 里、也不算外设。</li>
+        <li><b>Flash 和 RAM 四个数</b>：Flash=Code+RO+RW，RAM=RW+ZI。这就是面试官问"你这个工程占多少内存"的标准答法。</li>
+      </ul>
+    </section>
+
+    <!-- ============ 6 ============ -->
+    <section class="sec">
+      <h2 id="follow" data-toc="6 · 追问与扣分点">面试官会接着问什么</h2>
+      <div class="tablewrap">
+        <table class="t">
+          <thead><tr><th style="width:40%">追问</th><th>怎么答（一句到位）</th></tr></thead>
+          <tbody>
+            <tr><td>ROM 不是只读吗，为什么还能烧程序？</td><td>MCU 里用的是 Flash，可擦写；只是擦除以页为单位、寿命有限（F103 约 1 万次）。</td></tr>
+            <tr><td>为什么全局变量的初值要放 Flash？</td><td>RAM 掉电就丢，初值必须固化；上电时启动代码把 <code>.data</code> 拷进 SRAM、把 <code>.bss</code> 清零，之后才跳 <code>main</code>。</td></tr>
+            <tr><td>栈和堆在哪里？会不会撞车？</td><td>都在 SRAM。栈从 RAM 顶端向下长，堆从 <code>.bss</code> 之后向上长，中间的空闲区就是安全余量，撞上就栈溢出。</td></tr>
+            <tr><td>外设寄存器算存储器吗？</td><td>物理上是触发器阵列，不是存储器；但被映射到地址空间，所以能当内存访问 —— 叫内存映射 I/O。</td></tr>
+            <tr><td>为什么必须加 volatile？</td><td>值会被硬件改，编译器不知道，会合并或消除访问。加了它，每次读都真的去读地址。</td></tr>
+            <tr><td>往 <code>0x0800_0000</code> 写数据会怎样？</td><td>F103 没有 MMU/MPU，不会像 PC 那样报"段错误"，而是总线错误 → <b>HardFault</b>，同时 Flash 控制器在 <code>FLASH_SR</code> 里置 PGERR/WRPRTERR。</td></tr>
+            <tr><td>72MHz 时 Flash 为什么要配等待周期？</td><td>Flash 读取速度跟不上 CPU 主频，需 2 个等待周期并开启预取缓冲；配错会跑飞或读数错。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="two" style="margin-top:16px">
+        <div class="theirs">
+          <h4>扣分回答</h4>
+          <ul class="plain">
+            <li>只停在"ROM 像硬盘、RAM 像内存"的类比，说不出 Flash/页擦除/寿命。</li>
+            <li>把 Register 一句"暂存数据的硬件"带过，没区分内核寄存器和外设寄存器。</li>
+            <li>说"局部变量在 Flash 里"（因看到 <code>const</code> 就以为局部也进 Flash）——局部 <code>const</code> 仍在栈上。</li>
+            <li>说"栈向上长、堆向下长"（记反了）。</li>
+          </ul>
+        </div>
+        <div class="pp">
+          <h4>加分动作</h4>
+          <ul class="plain">
+            <li>主动说出"一个变量的初值在 Flash、运行副本在 SRAM"。</li>
+            <li>主动给出 <code>Program Size</code> 四个数与 Flash/RAM 的换算。</li>
+            <li>把"无 MMU ⇒ 写 Flash 是 HardFault 而非段错误"点出来，直接区分于 PC 经验。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <div class="tldr" style="margin-top:8px">
+      <div class="tl">一句话带走的记忆锚</div>
+      <p><b>Flash 存"不会变的"，SRAM 存"正在变的"，寄存器存"马上要用的"。</b>三者不是三种硬盘，是速度、成本、掉电三条线拉出来的三个位置。</p>
+    </div>
+  </main>
+</div>
+
+<footer class="pg">
+  <span>STM32 面试题精讲 · Q01 ROM / RAM / Register</span>
+  <span>源码见 <code>code/mem_sections_pc.c</code>、<code>code/mem_layout_stm32.c</code></span>
+</footer>
+
+<script src="assets/app.js"></script>
+<script>
+/* 本页专用：变量落点查询器 */
+(function () {
+  var sel = document.getElementById('vkind');
+  if (!sel) return;
+  var W = document.getElementById('w_where');
+  var S = document.getElementById('w_sec');
+  var K = document.getElementById('w_keep');
+  var R = document.getElementById('w_rw');
+  var T = document.getElementById('w_tip');
+
+  /* [落点, 段, 掉电, 可写, 说明] */
+  var DATA = [
+    ['Flash（ROM 角色）', '.rodata', '不丢', '不可（写则 HardFault）',
+      'const 全局量在编译期就定了值，直接嵌进 Flash 镜像。想做"运行时可改的查表"，去掉 const 或复制到 RAM。'],
+    ['Flash（ROM 角色）', '.rodata', '不丢', '不可',
+      '字符串字面量是只读数据，和 const 同段。想改字符串要先拷进自己的数组：char buf[16]; strcpy(buf, "hello");'],
+    ['SRAM（RAM 角色）', '.data', '丢', '可以',
+      '有初值的全局变量。初值另存一份在 Flash，上电由启动代码拷进 SRAM，所以它物理上占两份。'],
+    ['SRAM（RAM 角色）', '.bss', '丢', '可以',
+      '未初始化的全局变量。只在段表里记长度，不占 Flash 体积；上电整段清零，因此"未初始化"实际等于 0，不是随机值。'],
+    ['SRAM（RAM 角色）', '栈 stack', '丢', '可以',
+      '函数局部变量（包括函数内的 const 局部量）都在栈上。函数一返回，这块内存就作废，别把它的地址传出去。'],
+    ['SRAM（RAM 角色）', '堆 heap', '丢', '可以',
+      'malloc 申请的空间。嵌入式里要慎用：碎片化 + 申请失败 + 与栈相撞，三条都是现场事故来源。'],
+    ['外设寄存器区（0x4000_0000）', '不属于 .data/.bss', '丢（配置需重写）', '可以（必须 volatile）',
+      '物理上不是存储器，是触发器阵列；被映射进地址空间，所以能用指针访问。硬件也会自己改它的状态位。'],
+    ['CPU 内核内部', '无段概念', '丢', '可以（指令写）',
+      'R0 没有地址，汇编直接引用，C 里取地址连编译都过不了。它就是最快的那一层，也是"寄存器"这个词的本义。'],
+    ['SRAM（RAM 角色）', '.data 或 .bss', '丢', '可以',
+      'static 局部变量：生命周期变成整个程序（所以不在栈上），但作用域仍只在本函数内。面试爱考这个"寿命与作用域不一致"。']
+  ];
+
+  function render() {
+    var d = DATA[parseInt(sel.value, 10)];
+    W.textContent = d[0];
+    S.textContent = d[1];
+    K.textContent = d[2];
+    R.textContent = d[3];
+    T.textContent = d[4];
+  }
+  sel.addEventListener('change', render);
+  render();
+})();
+</script>
+</body>
+</html>

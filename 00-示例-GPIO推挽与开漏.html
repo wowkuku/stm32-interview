@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<!--
+================================================================================
+ [项目] STM32 面试题精讲 · 可视化讲解网页系列
+ [本页] 格式示例页 · GPIO 推挽与开漏的本质区别 + CRL 寄存器配置（非正式题号）
+ [生成] 2026-11-24　｜　同目录 README.md 是项目总说明，改代码前先读它
+================================================================================
+
+ [目的]
+   系列第一页，用于"定版式"：把一个问题改写成面试考法并做成单页讲解的标准样子。
+   后续题目页（01、02 …）直接复用本页的六块结构与 assets/ 共用资源。
+   本页要回答的问题：推挽与开漏的本质区别、各自适用场景、CRL 位域怎么配。
+
+ [页面结构] 固定六块，顺序不许调换
+   ① 面试题干 ② 30 秒版答案 ③ 思路解析（含 1 张输出级对比 SVG
+   + 交互件"CRL 位域拆解器"）④ 可运行源码（裸寄存器 / 标准库 / PC 侧位运算验证）
+   ⑤ 关键要点 ⑥ 追问与扣分点，页尾一句"记忆锚"。
+
+ [技术结构]
+   零依赖、纯离线：assets/style.css 提供全部样式（浅色主题，:root 变量）；
+   assets/app.js 负责代码着色、复制按钮、目录滚动高亮、阅读进度；
+   本页专属 <script> 只有位域拆解器一段，纯原生 JS，无第三方库。
+   可编译源码在 code/ 目录，页内代码块为节选。
+
+ [事实口径]
+   STM32F103 + 标准外设库 / 裸寄存器；寄存器位定义取自 RM0008；
+   PC 侧位运算结论来自 gcc 实跑输出。
+
+ [修改要求] 后来者（含 AI）必须遵守
+   1 不改动 assets/ 两个共用文件（其他页面依赖），换主题只改 :root 变量。
+   2 代码块特殊字符需转义；不需着色的块加 data-raw。
+   3 正文用中文引号，代码与属性用 ASCII 直引号。
+   4 新增 h2 时补 id 与 data-toc；新增页面后同步 index.html 列表。
+   5 本注释内禁止出现连续两个英文字符减号，分隔线统一用等号。
+================================================================================
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>示例页 · GPIO 推挽与开漏 · STM32 面试题精讲</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<div id="progress"></div>
+
+<div class="topbar">
+  <div class="inner">
+    <a class="home" href="index.html">← 题目列表</a>
+    <span class="crumb">示例页 · <b>GPIO 推挽 / 开漏与 CRL 配置</b></span>
+    <span class="chip ghost" style="margin-left:auto">格式示例</span>
+  </div>
+</div>
+
+<div class="layout">
+  <aside class="toc">
+    <div class="toc-title">本页目录</div>
+    <nav id="toc"></nav>
+  </aside>
+
+  <main>
+    <div class="hero">
+      <div class="tagrow">
+        <span class="chip b">GPIO</span>
+        <span class="chip b">寄存器 CRL/CRH</span>
+        <span class="chip t">F1 系列</span>
+        <span class="chip w">高频：★★★★★</span>
+        <span class="chip ghost">示例页（非正式题号）</span>
+      </div>
+      <h1><span class="qno">示例 ·</span> 推挽和开漏的本质区别是什么？寄存器怎么配？</h1>
+      <p class="sub">这是后续每道题的页面模板：面试题干 → 30 秒版答案 → 思路解析（含图 / 交互）→ 可运行源码 → 关键要点 → 追问与扣分点。</p>
+    </div>
+
+    <!-- ============ 1. 面试题干 ============ -->
+    <section class="sec">
+      <h2 id="q" data-toc="1 · 面试题干">面试题干</h2>
+      <div class="qbox">
+        <div class="qlabel">面试官问</div>
+        <p class="qtext">STM32 的 GPIO 有几种输出模式？推挽和开漏的本质区别在哪，什么时候必须用开漏？<br>
+        请不依赖库函数，把 PA0 配置成推挽输出 50MHz，并说明 CRL 寄存器里那 4 位每一位的含义。</p>
+        <p class="qsub">考察点：内部电路结构 → 电平能力 → 应用场景 → 寄存器位域 → 时钟使能这个必踩坑。<br>
+        面试官真正想听的不是"背四种模式"，而是<b>你能不能从电路推出什么时候该用哪个</b>。</p>
+      </div>
+    </section>
+
+    <!-- ============ 2. 30 秒版 ============ -->
+    <section class="sec">
+      <h2 id="tldr" data-toc="2 · 30 秒版答案">30 秒版答案</h2>
+      <div class="tldr">
+        <div class="tl">先给结论，再展开</div>
+        <p>推挽有上、下两个 MOS，<b>能主动输出高和低</b>，驱动能力强；开漏<b>只有下管</b>，只能拉低，高电平得靠外部上拉电阻——所以它天生适合<b>电平转换、线与、I²C 这类双向总线</b>。寄存器上每根脚在 CRL/CRH 里占 4 位：<b>低 2 位 MODE 是速度/输入，高 2 位 CNF 是模式类型</b>，PA0 配推挽 50MHz 就是写 <code>0x3</code>。</p>
+      </div>
+    </section>
+
+    <!-- ============ 3. 思路解析 ============ -->
+    <section class="sec">
+      <h2 id="how" data-toc="3 · 思路解析">思路解析</h2>
+
+      <h3>3.1 从电路看区别：为什么"开漏只能拉低"</h3>
+      <p>面试官问"本质区别"，答案不在寄存器里，在<b>输出级只有几个 MOS 管</b>这件事上。看下面这张图就够：</p>
+
+      <svg viewBox="0 0 680 320" width="100%" role="img" aria-label="推挽与开漏输出级对比示意图" style="font-family:-apple-system,'Segoe UI','Microsoft YaHei',sans-serif">
+        <defs>
+          <marker id="ar" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+            <path d="M0,0 L7,3.5 L0,7 z" fill="#94a3b8"/>
+          </marker>
+        </defs>
+
+        <!-- 标题 -->
+        <text x="22" y="24" font-size="13.5" font-weight="700" fill="#17212f">推挽输出 Push-Pull</text>
+        <text x="364" y="24" font-size="13.5" font-weight="700" fill="#17212f">开漏输出 Open-Drain</text>
+
+        <!-- 左面板 -->
+        <rect x="6" y="34" width="326" height="278" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+        <text x="100" y="56" font-size="11" fill="#64748b" text-anchor="middle">VDD 3.3V</text>
+        <line x1="100" y1="64" x2="232" y2="64" stroke="#94a3b8" stroke-width="1.6"/>
+        <line x1="100" y1="64" x2="100" y2="84" stroke="#94a3b8" stroke-width="1.6"/>
+        <rect x="72" y="84" width="56" height="38" rx="7" fill="#eef3ff" stroke="#bcd0f5"/>
+        <text x="100" y="108" font-size="11.5" font-weight="600" fill="#2563eb" text-anchor="middle">P-MOS</text>
+        <line x1="100" y1="122" x2="100" y2="160" stroke="#94a3b8" stroke-width="1.6"/>
+        <circle cx="100" cy="160" r="3.6" fill="#2563eb"/>
+        <line x1="100" y1="160" x2="248" y2="160" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ar)"/>
+        <text x="206" y="152" font-size="11.5" font-weight="700" fill="#17212f" text-anchor="middle">PA0</text>
+        <line x1="100" y1="160" x2="100" y2="178" stroke="#94a3b8" stroke-width="1.6"/>
+        <rect x="72" y="178" width="56" height="38" rx="7" fill="#eef3ff" stroke="#bcd0f5"/>
+        <text x="100" y="202" font-size="11.5" font-weight="600" fill="#2563eb" text-anchor="middle">N-MOS</text>
+        <line x1="100" y1="216" x2="100" y2="252" stroke="#94a3b8" stroke-width="1.6"/>
+        <line x1="76" y1="252" x2="124" y2="252" stroke="#94a3b8" stroke-width="1.8"/>
+        <text x="100" y="270" font-size="11" fill="#64748b" text-anchor="middle">GND</text>
+        <!-- 栅极 -->
+        <line x1="48" y1="103" x2="48" y2="197" stroke="#94a3b8" stroke-width="1.6"/>
+        <line x1="48" y1="103" x2="72" y2="103" stroke="#94a3b8" stroke-width="1.6"/>
+        <line x1="48" y1="197" x2="72" y2="197" stroke="#94a3b8" stroke-width="1.6"/>
+        <text x="14" y="152" font-size="10.5" fill="#0d9488" font-weight="700">ODR</text>
+        <text x="24" y="294" font-size="11" fill="#445064">两管互补：1 走上管，0 走下管</text>
+
+        <!-- 右面板 -->
+        <rect x="348" y="34" width="326" height="278" rx="12" fill="#ffffff" stroke="#e2e8f0"/>
+        <text x="422" y="58" font-size="11" fill="#64748b">VDD</text>
+        <line x1="440" y1="64" x2="580" y2="64" stroke="#94a3b8" stroke-width="1.6"/>
+        <line x1="500" y1="64" x2="500" y2="96" stroke="#94a3b8" stroke-width="1.6"/>
+        <rect x="492" y="96" width="16" height="30" rx="3" fill="#e8f7f4" stroke="#0d9488"/>
+        <text x="518" y="105" font-size="11" fill="#0d9488" font-weight="700">R 外部上拉</text>
+        <text x="518" y="119" font-size="10.5" fill="#78849a">(常见 4.7k~10k，随总线电容)</text>
+        <line x1="500" y1="126" x2="500" y2="160" stroke="#94a3b8" stroke-width="1.6"/>
+        <line x1="440" y1="160" x2="500" y2="160" stroke="#94a3b8" stroke-width="1.6"/>
+        <circle cx="440" cy="160" r="3.6" fill="#0d9488"/>
+        <line x1="440" y1="160" x2="600" y2="160" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ar)"/>
+        <text x="560" y="152" font-size="11.5" font-weight="700" fill="#17212f" text-anchor="middle">PA0</text>
+        <!-- 无上管 -->
+        <rect x="412" y="80" width="58" height="30" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-dasharray="4 3"/>
+        <text x="441" y="99" font-size="10.5" fill="#94a3b8" text-anchor="middle">无 P-MOS</text>
+        <line x1="440" y1="160" x2="440" y2="178" stroke="#94a3b8" stroke-width="1.6"/>
+        <rect x="412" y="178" width="56" height="38" rx="7" fill="#e8f7f4" stroke="#bfe6e0"/>
+        <text x="440" y="202" font-size="11.5" font-weight="600" fill="#0d9488" text-anchor="middle">N-MOS</text>
+        <line x1="380" y1="197" x2="412" y2="197" stroke="#94a3b8" stroke-width="1.6"/>
+        <text x="356" y="201" font-size="10.5" fill="#0d9488" font-weight="700">ODR</text>
+        <line x1="440" y1="216" x2="440" y2="252" stroke="#94a3b8" stroke-width="1.6"/>
+        <line x1="416" y1="252" x2="464" y2="252" stroke="#94a3b8" stroke-width="1.8"/>
+        <text x="440" y="270" font-size="11" fill="#64748b" text-anchor="middle">GND</text>
+        <text x="364" y="294" font-size="11" fill="#445064">只有下管：写 0 拉低，写 1 只是"放手"</text>
+      </svg>
+
+      <div class="callout good">
+        <span class="ct">一句话抓住本质</span>
+        推挽 = 有资格"说两种话"；开漏 = 只会"拉低"和"闭嘴"。凡是<b>多个器件共用一根线</b>（I²C、1-Wire、多主总线、中断线）的场景，必须用开漏——因为只有"拉低 / 放手"才能做<b>线与</b>而不烧管子。
+      </div>
+
+      <h3>3.2 CRL / CRH 的位域：4 位一个引脚</h3>
+      <p>F1 系列没有"每脚一个寄存器"，而是 16 根脚挤在 32 位里：<code>CRL</code> 管 PA0~PA7，<code>CRH</code> 管 PA8~PA15（B/C/D/E 口同理）。每 4 位 = <b>CNF[1:0] + MODE[1:0]</b>。</p>
+
+      <div class="widget">
+        <h4>位域拆解器 —— 改 CNF / MODE，看它到底变成什么模式</h4>
+        <p class="wsub">模式含义随 MODE 是否为 00 而整体翻转，这是最容易配错的地方，亲手拨一遍比背表管用。</p>
+        <div class="wrow">
+          <div class="wfield">
+            <label for="cnf">CNF（高 2 位）</label>
+            <select id="cnf">
+              <option value="0">00</option>
+              <option value="1">01</option>
+              <option value="2">10</option>
+              <option value="3">11</option>
+            </select>
+          </div>
+          <div class="wfield">
+            <label for="mode">MODE（低 2 位）</label>
+            <select id="mode">
+              <option value="0">00 输入</option>
+              <option value="1">01 输出 10MHz</option>
+              <option value="2">10 输出 2MHz</option>
+              <option value="3" selected>11 输出 50MHz</option>
+            </select>
+          </div>
+          <div class="wfield">
+            <label>CRL 中这 4 位（bit3..bit0）</label>
+            <div class="bits" id="bits">
+              <span class="c">0</span><span class="c">0</span><span class="m">1</span><span class="m">1</span>
+            </div>
+          </div>
+          <div class="wfield">
+            <label>该写的十六进制</label>
+            <div style="font-family:var(--mono);font-size:19px;font-weight:700;color:#2563eb" id="hexv">0x3</div>
+          </div>
+        </div>
+        <div class="wout">
+          当前配置 = <span class="modename" id="modename">通用推挽输出</span>　·　
+          速度 <b id="spdv">50 MHz</b>　·　
+          <span id="tipv">能主动输出高/低，适合驱动 LED、推蜂鸣器。</span>
+        </div>
+      </div>
+
+      <h3>3.3 四种输出模式对照</h3>
+      <div class="tablewrap">
+        <table class="t">
+          <thead>
+            <tr><th>CNF</th><th>模式</th><th>高电平由谁给</th><th>典型用途</th><th>坑</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>00</code></td><td>通用推挽 <code>Out_PP</code></td><td>内部 P-MOS</td><td>LED、蜂鸣器、普通数字输出、SPI 单向</td><td>两脚对推容易烧</td></tr>
+            <tr><td><code>01</code></td><td>通用开漏 <code>Out_OD</code></td><td>外部上拉</td><td>电平转换、线与、软件 I²C</td><td>忘接上拉 → 永远读不到高</td></tr>
+            <tr><td><code>10</code></td><td>复用推挽 <code>AF_PP</code></td><td>内部 P-MOS</td><td>USART_TX、SPI_SCK/MOSI、PWM 输出</td><td>配成通用口 → 外设没波形</td></tr>
+            <tr><td><code>11</code></td><td>复用开漏 <code>AF_OD</code></td><td>外部上拉</td><td>硬件 I²C 的 SCL/SDA、SMBus</td><td>忘接上拉 → 总线恒低</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout warn">
+        <span class="ct">同一个 CNF，在输入模式下含义完全不同</span>
+        当 <code>MODE = 00</code> 时：<code>CNF=00</code> 模拟输入（ADC 用）、<code>01</code> 浮空输入（<b>复位默认值</b>）、<code>10</code> 上拉/下拉输入（<b>具体哪个由 ODR 位决定</b>）、<code>11</code> 保留。所以"把脚配成输入"只有 <code>MODE=00</code> 是不够的，CNF 写错就会变成模拟或保留。
+      </div>
+    </section>
+
+    <!-- ============ 4. 源码 ============ -->
+    <section class="sec">
+      <h2 id="code" data-toc="4 · 可运行源码">可运行源码</h2>
+      <p>下面三段：<b>裸寄存器版</b>（不依赖任何库，面试手写就这个）、<b>标准库版</b>（工程里实际用的）、<b>PC 侧位域验证</b>（烧板子前先确认写的值对不对，已在本机实跑）。</p>
+
+      <figure class="code">
+        <figcaption><span class="fname">bsp_gpio.c</span><span class="note">STM32F103 · 裸寄存器</span><button class="copy" type="button">复制</button></figcaption>
+        <pre><code class="lang-c">#include &lt;stdint.h&gt;
+
+/* 只声明要用的几个寄存器，地址取自 RM0008 存储器映射表 */
+#define RCC_APB2ENR   (*(volatile uint32_t *)0x40021018UL)
+#define GPIOA_CRL     (*(volatile uint32_t *)0x40010800UL)
+#define GPIOA_BSRR    (*(volatile uint32_t *)0x40010810UL)
+#define GPIOB_CRL     (*(volatile uint32_t *)0x40010C00UL)
+
+#define IOPAEN        (1UL &lt;&lt; 2)   /* APB2 上 GPIOA 的时钟使能位 */
+#define IOPBEN        (1UL &lt;&lt; 3)
+
+/* PA0：推挽输出 50MHz —— 面试要求手写的就是这 4 行 */
+void pa0_push_pull_50mhz(void)
+{
+    RCC_APB2ENR |= IOPAEN;            /* ① 先开时钟，否则下面写入全部无效 */
+    (void)RCC_APB2ENR;                /* ② 读回一次等时钟稳定（F1 经典写法） */
+
+    GPIOA_CRL &amp;= ~(0xFUL &lt;&lt; 0);       /* ③ 清 PA0 的 4 位，掩码 0xF 不能是 0x3 */
+    GPIOA_CRL |=  (0x3UL &lt;&lt; 0);       /*    CNF=00 通用推挽 + MODE=11 50MHz */
+}
+
+/* PA8：推挽输出 2MHz —— 注意 PA8 起换到 CRH，位偏移从 (pin-8) 算 */
+void pa8_push_pull_2mhz(void)
+{
+    RCC_APB2ENR |= IOPAEN;
+    (void)RCC_APB2ENR;
+    GPIOA_CRL;                        /* 占位，保持函数对称性，可删 */
+    (*(volatile uint32_t *)0x40010804UL) &amp;= ~(0xFUL &lt;&lt; 0);   /* CRH */
+    (*(volatile uint32_t *)0x40010804UL) |=  (0x2UL &lt;&lt; 0);   /* CNF=00, MODE=10 */
+}
+
+/* PB6/PB7：复用开漏 50MHz —— I2C1 的 SCL/SDA，外部必须接上拉 */
+void pb6_pb7_af_open_drain(void)
+{
+    RCC_APB2ENR |= IOPBEN;
+    (void)RCC_APB2ENR;
+    GPIOB_CRL &amp;= ~((0xFUL &lt;&lt; 24) | (0xFUL &lt;&lt; 28));  /* 清 PB6(24) / PB7(28) */
+    GPIOB_CRL |=  ((0xFUL &lt;&lt; 24) | (0xFUL &lt;&lt; 28));  /* CNF=11 复用开漏, MODE=11 */
+}
+
+/* 输出电平：用 BSRR，单次写就是原子操作，不会像 ODR 那样"读改写" */
+void pa0_set(int level)
+{
+    if (level) GPIOA_BSRR = (1UL &lt;&lt; 0);      /* 低 16 位置 1 */
+    else       GPIOA_BSRR = (1UL &lt;&lt; 16);     /* 高 16 位复位，写 1 有效 */
+}</code></pre>
+      </figure>
+
+      <figure class="code">
+        <figcaption><span class="fname">bsp_gpio_spl.c</span><span class="note">标准库（工程里实际用这份）</span><button class="copy" type="button">复制</button></figcaption>
+        <pre><code class="lang-c">#include "stm32f10x.h"
+
+void bsp_gpio_init(void)
+{
+    GPIO_InitTypeDef g;
+
+    /* 时钟是"外设的总开关"，任何 GPIO / 外设配置之前都要先开 */
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOA | RCC_APB2Periph_GPIOB, ENABLE);
+
+    /* PA0 推挽输出 50MHz：驱动 LED */
+    g.GPIO_Pin   = GPIO_Pin_0;
+    g.GPIO_Mode  = GPIO_Mode_Out_PP;
+    g.GPIO_Speed = GPIO_Speed_50MHz;
+    GPIO_Init(GPIOA, &amp;g);
+
+    /* PB6 / PB7 复用开漏：交给 I2C1 硬件，外部 4.7k 上拉到 3.3V */
+    g.GPIO_Pin  = GPIO_Pin_6 | GPIO_Pin_7;
+    g.GPIO_Mode = GPIO_Mode_AF_OD;
+    GPIO_Init(GPIOB, &amp;g);
+
+    GPIO_SetBits(GPIOA, GPIO_Pin_0);      /* 先给个确定电平，别悬空 */
+}</code></pre>
+      </figure>
+
+      <p>烧板子之前，先在 PC 上把"该写哪 4 位"算清楚——这类错误在板子上只会表现为"没反应"，看不出原因。</p>
+
+      <figure class="code">
+        <figcaption><span class="fname">gpio_crl_verify.c</span><span class="note">PC 侧 · gcc 直接编译运行</span><button class="copy" type="button">复制</button></figcaption>
+        <pre><code class="lang-c">#include &lt;stdio.h&gt;
+#include &lt;stdint.h&gt;
+
+/* 一个引脚在 CRL/CRH 里占 4 bit: [3:2]=CNF, [1:0]=MODE */
+static uint32_t nibble(int cnf, int mode)
+{
+    return ((uint32_t)(cnf &amp; 0x3u) &lt;&lt; 2) | (uint32_t)(mode &amp; 0x3u);
+}
+
+int main(void)
+{
+    uint32_t crl = 0x44444444u;   /* 复位值: 每个引脚 0b0100 = 浮空输入 */
+    crl &amp;= ~(0xFu &lt;&lt; 0);           /* 清 PA0 的 4 位 */
+    crl |= nibble(0, 3) &lt;&lt; 0;      /* CNF=00 推挽, MODE=11 50MHz */
+    printf("PA0 推挽50MHz : CRL = 0x%08X, PA0 = 0x%X\n", crl, (crl &gt;&gt; 0) &amp; 0xF);
+
+    return 0;
+}</code></pre>
+      </figure>
+
+      <figure class="code">
+        <figcaption><span class="fname">实际运行输出</span><span class="note">本机 gcc 16.1.0 实跑</span></figcaption>
+        <pre><code data-raw>PA0 推挽50MHz : CRL = 0x44444443, PA0 = 0x3
+只清低2位的后果: CRL = 0x44444447, PA0 = 0x7 (=不是推挽(错))
+PA8 开漏2MHz  : CRH = 0x44444446, PA8 = 0x6</code></pre>
+      </figure>
+
+      <div class="callout bad">
+        <span class="ct">看第二行 —— 这就是最常见的坑</span>
+        想清 PA0 却只清低 2 位 <code>&amp;= ~(0x3 &lt;&lt; 0)</code>，CNF 里残留的 <code>01</code> 还在，结果 <code>0x7</code> = <b>开漏</b>而不是推挽。板子上的表现：LED 接法不变时"好像也能亮"，但换成推电流的负载就软了。<b>清位掩码必须是 <code>0xF</code></b>。
+      </div>
+    </section>
+
+    <!-- ============ 5. 关键要点 ============ -->
+    <section class="sec">
+      <h2 id="key" data-toc="5 · 关键要点">关键要点（记这几条就够）</h2>
+      <ul class="points">
+        <li><b>先时钟后配置</b>：<code>RCC_APB2ENR</code> 的对应位置 1 之前，写 CRL/CRH 全部无效——而且不报错，只是"没反应"。这是面试官最爱埋的雷。</li>
+        <li><b>4 位一引脚，掩码 0xF</b>：<code>CRL</code> 是 PA0~7 每脚 4 位（偏移 <code>4*n</code>）；<code>CRH</code> 是 PA8~15（偏移 <code>4*(n-8)</code>）。PA8 还在 CRL 里找——这是第二个雷。</li>
+        <li><b>MODE=00 时 CNF 完全换含义</b>：输入不是"什么都不配"，<code>CNF</code> 决定模拟/浮空/上拉。上拉还是下拉看 <code>ODR</code>。</li>
+        <li><b>推挽 vs 开漏只差"有没有上管"</b>：有上管 → 可主动输出高，驱动强；无上管 → 只能拉低，靠外部上拉，换来线与与电平转换能力。</li>
+        <li><b>复用 = 引脚让给片上外设</b>：USART/SPI/TIM 输出必须配 <code>AF_PP</code>（I²C 是 <code>AF_OD</code>），配成通用口外设照样不动。</li>
+      </ul>
+    </section>
+
+    <!-- ============ 6. 追问 ============ -->
+    <section class="sec">
+      <h2 id="follow" data-toc="6 · 追问与扣分点">面试官会接着问什么</h2>
+
+      <div class="tablewrap">
+        <table class="t">
+          <thead><tr><th style="width:44%">追问</th><th>怎么答（一句到位）</th></tr></thead>
+          <tbody>
+            <tr><td>为什么 I²C 必须开漏？</td><td>多主多从共用两根线，靠<b>线与</b>仲裁：任何一方拉低总线就是低，谁都不许"强行输出高"。推挽会形成两管对灌，直接烧。</td></tr>
+            <tr><td>开漏输出高电平时有什么缺点？</td><td>上升沿由 <b>R×C</b> 决定，上拉越大越慢。所以高速场合要减小上拉（功耗↑）或用有源上拉。</td></tr>
+            <tr><td>推挽能直接驱动 LED 吗？几毫安？</td><td>能。<b>单脚建议 ≤8mA，整片 VDD/VSS 合计有上限</b>（F103 单脚 25mA 绝对最大值、总和 150mA）。驱动大电流要加三极管/MOS。</td></tr>
+            <tr><td>为什么输出用 BSRR 而不是 ODR？</td><td>ODR 是"读-改-写"，多任务/中断里操作同一端口会互相覆盖；BSRR 单次写、硬件原子，且能同时置位/复位不同脚。</td></tr>
+            <tr><td>50MHz 是什么意思？</td><td>是<b>输出翻转速度档位</b>，不是时钟频率。档位越高边沿越陡、EMI 越大，够用就行，别一律 50MHz。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="two" style="margin-top:16px">
+        <div class="theirs">
+          <h4>扣分回答</h4>
+          <ul class="plain">
+            <li>"推挽输出高低电平，开漏输出低电平" —— 然后就停了，没提外部上拉和场景。</li>
+            <li>配 GPIO 不提时钟使能，直接写 CRL。</li>
+            <li>把 CNF 和 MODE 的位序记反（说低 2 位是 CNF）。</li>
+            <li>PA8 去 CRL 里配（忘了 CRH）。</li>
+          </ul>
+        </div>
+        <div class="pp">
+          <h4>加分动作</h4>
+          <ul class="plain">
+            <li>主动说"清位要 <code>&amp;= ~(0xF &lt;&lt; 4n)</code>"，面试官会认为你真写过。</li>
+            <li>补一句"上拉输入还是下拉输入由 ODR 决定"。</li>
+            <li>补一句"BSRR 原子写，适合中断里点灯"。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <div class="tldr" style="margin-top:8px">
+      <div class="tl">一句话带走的记忆锚</div>
+      <p><b>上管决定"能不能说高"，下管决定"能不能说低"。</b>推挽两个都有，所以能主动；开漏只有下管，所以只能拉低、剩下靠上拉——这就是它敢上总线的理由。</p>
+    </div>
+  </main>
+</div>
+
+<footer class="pg">
+  <span>STM32 面试题精讲 · 示例页（GPIO 推挽 / 开漏）</span>
+  <span>页面自包含，可离线打开 · 源码与本页同目录 <code>code/</code></span>
+</footer>
+
+<script src="assets/app.js"></script>
+<script>
+/* 本页专用：CRL 位域拆解器 */
+(function () {
+  var cnf = document.getElementById('cnf');
+  var mode = document.getElementById('mode');
+  var bits = document.getElementById('bits').children;
+  var hexv = document.getElementById('hexv');
+  var modename = document.getElementById('modename');
+  var spdv = document.getElementById('spdv');
+  var tipv = document.getElementById('tipv');
+  if (!cnf || !mode) return;
+
+  var OUT = ['通用推挽输出', '通用开漏输出', '复用推挽输出', '复用开漏输出'];
+  var OUT_TIP = [
+    '能主动输出高/低，驱动能力强。适合 LED、蜂鸣器、普通数字输出。',
+    '只有下管，高电平靠外部上拉。适合电平转换、线与、软件 I²C。',
+    '引脚交给片上外设（USART_TX / SPI / PWM），外设自己驱动。',
+    '引脚交给片上外设且开漏（硬件 I²C 的 SCL/SDA），外部必须上拉。'
+  ];
+  var IN = ['模拟输入（ADC 用，施密特触发器关闭）', '浮空输入（复位默认值）', '上拉/下拉输入（哪个由 ODR 决定）', '保留，不要用'];
+  var IN_TIP = [
+    '模拟通道，信号直通 ADC，不经过数字输入电路。',
+    '电平完全由外部决定，悬空时读数随机。',
+    '内部弱上/下拉（约 30~50kΩ），按键输入常用。',
+    '保留组合，手册明确禁止使用。'
+  ];
+  var SPD = ['—', '10 MHz', '2 MHz', '50 MHz'];
+
+  function render() {
+    var c = parseInt(cnf.value, 10), m = parseInt(mode.value, 10);
+    var v = (c << 2) | m;
+    /* bit3 bit2 = CNF, bit1 bit0 = MODE */
+    var arr = [(v >> 3) & 1, (v >> 2) & 1, (v >> 1) & 1, v & 1];
+    for (var i = 0; i < 4; i++) bits[i].textContent = arr[i];
+
+    hexv.textContent = '0x' + v.toString(16).toUpperCase();
+    if (m === 0) {
+      modename.textContent = IN[c];
+      spdv.textContent = '—（输入模式，MODE=00）';
+      tipv.textContent = IN_TIP[c];
+    } else {
+      modename.textContent = OUT[c];
+      spdv.textContent = SPD[m];
+      tipv.textContent = OUT_TIP[c];
+    }
+  }
+  cnf.addEventListener('change', render);
+  mode.addEventListener('change', render);
+  render();
+})();
+</script>
+</body>
+</html>
